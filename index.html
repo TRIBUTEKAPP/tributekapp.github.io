@@ -7,6 +7,9 @@
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- CUENTAS Y FIRMAS (opcional). Para activar el ingreso con cuentas, escribe aquí la dirección y la clave PÚBLICA («anon») de tu proyecto de Supabase (ver docs/cuentas/LEEME.md).
+     Con estos datos vacíos, Tributek funciona como siempre: clientes en este navegador, sin ingreso. NUNCA pongas aquí la clave «service_role». -->
+<script>window.TRIBUTEK_CONFIG=window.TRIBUTEK_CONFIG||{supabaseUrl:'https://cfnufabraxsefszftemw.supabase.co',supabaseAnonKey:'sb_publishable_ciowmf4-ZDBTw8wPJ9bwOg_UFEEDYNd',politicaUrl:''};</script>
 <style>
 /* ==========================================================
    Revisión de impuestos — Tema visual v3 (identidad del logo: blanco, azul marino y rojo vino)
@@ -481,6 +484,37 @@ main .buscar .ic{color:var(--muted)}
 .uvtform{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin:10px 0}.uvtform input{min-width:150px}
 .norma-err{color:#9b1c1c}
 
+/* Ingreso y cuentas (opcional): pantalla completa, marca a la izquierda y formulario a la derecha; no se ve nada de la aplicación detrás */
+body.gate-activo>*:not(#gate):not(#toast):not(script):not(style){visibility:hidden}
+.gate{position:fixed;inset:0;z-index:90;display:flex;background:var(--soft);color:var(--ink);overflow:auto}
+.gate-marca{flex:1.15;display:flex;flex-direction:column;justify-content:center;gap:22px;padding:56px clamp(32px,6vw,96px);color:#fff;position:relative;overflow:hidden;
+  background:radial-gradient(1200px 600px at 0% 0%,rgba(242,139,141,.16),transparent 60%),linear-gradient(155deg,#0F2A4D 0%,#1D4677 58%,#2A5A96 100%)}
+.gate-marca::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.045) 0 1px,transparent 1px 26px);pointer-events:none}
+.gate-marca>*{position:relative}
+.gate-logo{align-self:flex-start;background:#fff;border-radius:18px;padding:18px 26px;box-shadow:0 14px 34px rgba(0,0,0,.28)}.gate-logo img{display:block;height:auto;max-width:100%}
+.gate-lema{margin:10px 0 0;font-size:clamp(28px,3.2vw,44px);line-height:1.12;font-weight:700;letter-spacing:-.01em}
+.gate-lema::after{content:"";display:block;width:64px;height:4px;border-radius:4px;background:var(--brand-light);margin-top:20px}
+.gate-sub{margin:0;max-width:520px;font-size:clamp(15px,1.25vw,18px);line-height:1.55;color:var(--band-muted)}
+.gate-lineas{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:14px;max-width:520px}
+.gate-lineas li{display:flex;gap:12px;align-items:flex-start;font-size:15px;line-height:1.45;color:#E7EEF9}
+.gate-lineas svg{flex:none;margin-top:1px;padding:3px;box-sizing:content-box;width:16px;height:16px;border-radius:50%;background:rgba(242,139,141,.22);color:var(--brand-light)}
+.gate-panel{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 24px;min-width:0}
+.gatecard{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-2);padding:34px 32px}
+.gatecard h3{margin:0 0 6px;font-size:22px;color:var(--ink)}.gatecard h4{margin:18px 0 4px;font-size:14px;color:var(--ink)}
+.gate-saludo{margin:0 0 14px;color:var(--muted);font-size:14px}.gate-pie{margin:0;font-size:12px;color:var(--muted);text-align:center}
+.gate .f{display:flex;flex-direction:column;gap:5px;margin:12px 0}.gate .f label{font-size:13px;font-weight:600;color:var(--ink)}
+.gate .f input{padding:11px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font:inherit;background:var(--surface);color:var(--ink)}
+.gate .f input:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(47,99,168,.22)}
+.gate .chk{display:flex;gap:8px;align-items:flex-start;margin:10px 0;font-size:14px;color:var(--ink)}.gate .row{display:flex;gap:10px;margin-top:14px}.gate .row .btn{width:100%;padding:12px 16px}
+.gate .hint{font-size:13px;margin:12px 0 0;color:var(--muted)}
+.gate .aviso{background:var(--warn-bg);border:1px solid #E8C37A;color:var(--warn);border-radius:var(--radius-sm);padding:9px 11px;margin:10px 0;font-size:13px}
+.gate-firmas{display:flex;flex-direction:column;gap:8px;margin:14px 0}.gate-firmas .btn{text-align:left}
+.link{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit}.bitacora{margin:0;padding-left:18px;font-size:13px;line-height:1.6}
+@media (max-width:900px){.gate{flex-direction:column}.gate-marca{flex:none;padding:26px 24px;gap:12px}.gate-logo{padding:10px 16px}.gate-logo img{width:150px;height:auto}.gate-lema{font-size:22px;margin:4px 0 0}.gate-lema::after{margin-top:12px;width:48px}.gate-sub,.gate-lineas{display:none}.gate-panel{justify-content:flex-start;padding:22px 16px}.gatecard{padding:26px 22px}}
+
+.gate-o{display:flex;align-items:center;gap:10px;margin:16px 0 0;font-size:12px;color:var(--muted)}.gate-o::before,.gate-o::after{content:"";flex:1;height:1px;background:var(--line)}
+.gate .btn.ghost{background:transparent;border:1.5px solid var(--accent);color:var(--accent);font-weight:600}.gate .btn.ghost:hover{background:var(--soft)}.gate-enlaces{text-align:center}
+
 </style>
 </head>
 <body>
@@ -851,6 +885,166 @@ const MENSAJES = {
     ayuda: 'Revisa la lista y, si alguna sí la usa, vuelve a ponerla con el botón.',
     vars: ['n', 'archivo', 'lista'],
     ejemplo: {n: 3, archivo: 'balance_junio.xlsx', lista: '236505, 23651510, 236550'}
+  },
+  'CTA-ERR-001': {
+    tipo: 'dato_faltante',
+    texto: 'El correo o la contraseña no coinciden.',
+    importa: 'Si sigues intentando sin acierto, la cuenta puede bloquearse por unos minutos.',
+    ayuda: 'Verifica el correo y vuelve a escribir la contraseña; si la olvidaste, pulsa «Olvidé mi contraseña».',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-002': {
+    tipo: 'dato_faltante',
+    texto: 'Falta confirmar tu correo.',
+    importa: 'Si no lo confirmas, no puedes entrar.',
+    ayuda: 'Revisa tu bandeja de entrada (y el spam) y pulsa el enlace del mensaje de confirmación.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-003': {
+    tipo: 'dato_faltante',
+    texto: 'Ese correo ya tiene una cuenta.',
+    importa: 'Si lo intentas de nuevo, no se crea otra.',
+    ayuda: 'Pulsa «Entrar» y escribe tu contraseña, o usa «Olvidé mi contraseña».',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-004': {
+    tipo: 'dato_faltante',
+    texto: 'La contraseña es demasiado corta o simple.',
+    importa: 'Si no cumple el mínimo, no se puede crear la cuenta.',
+    ayuda: 'Escribe una contraseña de al menos 10 caracteres.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-005': {
+    tipo: 'falla_interna',
+    texto: 'No pude conectar con el servicio de cuentas.',
+    importa: 'Si no hay conexión, no puedes entrar a tu firma desde aquí.',
+    ayuda: 'Verifica tu conexión a internet y vuelve a intentarlo.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-006': {
+    tipo: 'dato_faltante',
+    texto: 'Ese código de invitación no sirve.',
+    importa: 'Si el código está vencido, ya se usó o es de otro correo, no se puede entrar a la firma.',
+    ayuda: 'Verifica que entraste con el mismo correo al que llegó la invitación o pide otra a tu administradora.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-007': {
+    tipo: 'dato_faltante',
+    texto: 'El código de registro no es válido.',
+    importa: 'Si no es válido, no se puede crear la firma.',
+    ayuda: 'Verifica el código con quien te lo dio y vuelve a escribirlo.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-008': {
+    tipo: 'dato_faltante',
+    texto: 'Tu rol en esta firma no permite hacer eso.',
+    importa: 'Si lo necesitas, el cambio no se guardó.',
+    ayuda: 'Avisa a la administradora de tu firma para que te cambie el rol.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-009': {
+    tipo: 'dato_faltante',
+    texto: 'Otra persona guardó este cliente antes que tú.',
+    importa: 'Si guardaras encima, se perderían sus cambios.',
+    ayuda: 'Revisa la versión más reciente que se cargó y repite tu cambio.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-010': {
+    tipo: 'dato_faltante',
+    texto: 'La dueña de la firma no se puede quitar ni cambiar de rol.',
+    importa: 'Si se pudiera, la firma quedaría sin dueña.',
+    ayuda: 'Confirma con la dueña lo que necesitas cambiar.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-011': {
+    tipo: 'falla_interna',
+    texto: 'No pude completar la acción con el servicio de cuentas.',
+    importa: 'Si se repite, el cambio no queda guardado.',
+    ayuda: 'Vuelve a intentarlo en un momento.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-012': {
+    tipo: 'dato_faltante',
+    texto: 'Alguno de los datos que escribiste no es válido.',
+    importa: 'Si no se corrige, no se puede guardar.',
+    ayuda: 'Revisa el nombre, el correo y el rol, y vuelve a intentarlo.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-013': {
+    tipo: 'dato_faltante',
+    texto: 'Esa persona ya es miembro de la firma.',
+    importa: 'Si la invitas otra vez, no cambia nada.',
+    ayuda: 'Revisa la lista de miembros; para cambiar su rol, elige otro en la lista.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-014': {
+    tipo: 'falla_interna',
+    texto: 'Hubo demasiados intentos seguidos.',
+    importa: 'Si insistes, el bloqueo dura más.',
+    ayuda: 'Espera unos minutos y vuelve a intentarlo.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-ERR-015': {
+    tipo: 'dato_faltante',
+    texto: 'Tu sesión terminó y hay que entrar de nuevo.',
+    importa: 'Si no entras de nuevo, los cambios no se guardan.',
+    ayuda: 'Vuelve a entrar con tu correo y tu contraseña.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CTA-INF-001': {
+    tipo: 'informativo',
+    texto: 'Creé la firma «{firma}». Quedaste como administradora y dueña.',
+    importa: 'Si invitas a tu equipo, cada persona verá solo los clientes de esta firma.',
+    ayuda: 'Pulsa «Mi firma» para invitar a las demás personas.',
+    vars: ['firma'],
+    ejemplo: {firma: 'Firma de ejemplo SAS'}
+  },
+  'CAR-TRB-001': {
+    tipo: 'informativo',
+    texto: 'Carpeta de trabajo elegida: «{carpeta}». Cada vez que generes un check list, también se guardará ahí.',
+    importa: 'Si generas el mismo check list otra vez, reemplaza al anterior de ese cliente y período; no se guardan versiones viejas.',
+    ayuda: 'Revisa el aviso que sale al descargar: te dice en qué carpeta quedó.',
+    vars: ['carpeta'],
+    ejemplo: {carpeta: 'Revisiones'}
+  },
+  'CAR-TRB-002': {
+    tipo: 'informativo',
+    texto: 'Guardé la última versión en «{ruta}».',
+    importa: 'Si ya había una versión de este cliente y período, quedó reemplazada.',
+    ayuda: 'Revisa la carpeta; el archivo también se descargó como siempre.',
+    vars: ['ruta'],
+    ejemplo: {ruta: 'Revisiones / CLIENTE SAS - 900123456 / 2026 / 05 - Mayo'}
+  },
+  'CAR-TRB-003': {
+    tipo: 'falla_interna',
+    texto: 'No pude guardar el check list en la carpeta de trabajo; se descargó como siempre.',
+    importa: 'Si no lo corriges, la última versión no queda en la carpeta.',
+    ayuda: 'Vuelve a elegir la carpeta o autoriza el acceso cuando el navegador lo pida.',
+    vars: [],
+    ejemplo: {}
+  },
+  'CAR-TRB-004': {
+    tipo: 'falla_interna',
+    texto: 'Este navegador o esta página no permite elegir una carpeta.',
+    importa: 'Si no puedes elegirla, los check list se seguirán descargando a la carpeta de descargas.',
+    ayuda: 'Vuelve a intentarlo en Chrome o Edge, desde la dirección publicada de Tributek.',
+    vars: [],
+    ejemplo: {}
   },
   'CUE-BAL-008': {
     tipo: 'informativo',
@@ -12085,7 +12279,7 @@ function xCheck(wb,d){
     r++;merged(ws,r,1,r,9,'Validaciones adicionales de la app (cruces automáticos):',HS);r++;
     for(const it of extra)fila(it);
   }
-  r++;ws.getCell(r,1).value='Generado con Revisión de impuestos · HB Consultores S.A.S. · '+new Date().toLocaleDateString('es-CO');ws.getCell(r,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
+  r++;ws.getCell(r,1).value=(d.pieExcel?d.pieExcel+' · ':'Generado con Revisión de impuestos · '+(d.firmaNombre||'HB Consultores S.A.S.')+' · ')+new Date().toLocaleDateString('es-CO');ws.getCell(r,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
 }
 
 /* ---------- Gastos Fijos ---------- */
@@ -12559,7 +12753,7 @@ function xAutorret(wb,d){
 
 /* ---------- Libro completo ---------- */
 function buildPapelTrabajo(ExcelJS,d){
-  const wb=new ExcelJS.Workbook();wb.creator='HB Consultores S.A.S. · Revisión de impuestos';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
   const conAuto=autoTotales(d.auto).tiene;
   xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xTablaRf(wb,d);xFormulario(wb,d);if(conAuto)xAutorret(wb,d);xBalance(wb,d);xVerif(wb,d);xDianRec(wb,d);xDianDS(wb,d);if(conAuto)xDianEmi(wb,d);xMov(wb,d);xObs(wb,d);xMesa(wb,d,['fechas','oportunidad','autorret']);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
@@ -12627,7 +12821,7 @@ function datosPapelGenerico(x){
   return d;
 }
 function buildPapelGenerico(ExcelJS,d){
-  const wb=new ExcelJS.Workbook();wb.creator='HB Consultores S.A.S. · Revisión de impuestos';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
   xDatos(wb,d);xCheck(wb,d);xObs(wb,d);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
@@ -12758,7 +12952,7 @@ function datosPapelRica(ctx,results,extra){
   d.conclusion=borradorConclusionRica(d)+textoCierre(extra.cierre);return d;
 }
 function buildPapelRica(ExcelJS,d){
-  const wb=new ExcelJS.Workbook();wb.creator='HB Consultores S.A.S. · Revisión de impuestos';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
   xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xFormularioRica(wb,d);xBalance(wb,d);xVerifRica(wb,d);xObs(wb,d);xMesa(wb,d,['formulario','pago','oportunidad','cuadre','detalle']);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
@@ -12913,7 +13107,7 @@ function datosPapelIca(ctx,results,extra){
   d.conclusion=borradorConclusionIca(d)+textoCierre(extra.cierre);return d;
 }
 function buildPapelIca(ExcelJS,d){
-  const wb=new ExcelJS.Workbook();wb.creator='Revisión de impuestos';wb.created=new Date();
+  const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre?d.firmaNombre+' · ':'')+'Revisión de impuestos';wb.created=new Date();
   xDatos(wb,d);xPeriodicidadIca(wb,d);xCheck(wb,d);xFijos(wb,d);xFormularioIca(wb,d);xBalance(wb,d);xVerificacionIca(wb,d);xAnexoIca(wb,d);xIngresosMunIca(wb,d);xDevolIca(wb,d);xObs(wb,d);xMesa(wb,d);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
@@ -12934,6 +13128,7 @@ function buildPapelIca(ExcelJS,d){
    11 · Checklist, descargas, respaldo e importación
    12 · Perfil del cliente: recolección, autoguardado, descartar cambios y aviso de respaldo
    13 · Eventos de pantalla y arranque
+   14 · Cuentas y firmas (opcional): ingreso, firma activa, miembros y clientes en la nube
 */
 /* ===== Interfaz ===== */
 /* ########## SECCIÓN 1 · Datos fijos, estado y utilidades de pantalla ########## */
@@ -12996,13 +13191,15 @@ function asegurarPer(c){if(S.imp==='retefuente')return;const ps=periodosActual(c
 /* ########## SECCIÓN 2 · Almacenamiento en el navegador ########## */
 /* ---- almacenamiento ---- */
 const LS='mesa_retefuente_clients_v1';
-function lsGet(){try{return JSON.parse(localStorage.getItem(LS)||'[]');}catch(e){return[];}}
+function lsGet(){if(S.cuenta)return[];try{return JSON.parse(localStorage.getItem(LS)||'[]');}catch(e){return[];}}
 /* Fotografía del último estado guardado de cada perfil: sirve para «Descartar cambios» y para que un perfil incompleto (que no se pudo autoguardar) no se escriba a medias cuando se guarda otro cliente */
 function fijarSnap(c){S.snap=S.snap||{};S.snap[c.id]=clone(c);}
 function snapDe(c){if(S.snap&&S.snap[c.id])return S.snap[c.id];const g=lsGet().find(x=>x.id===c.id);return g?clone(g):null;}
-function lsSet(){try{localStorage.setItem(LS,JSON.stringify(S.clients.filter(c=>!c._new).map(c=>{if(S.faltaPerfil&&S.faltaPerfil.id===c.id){const g=snapDe(c);if(g){g.periods=c.periods;return g;}}return c;})));}catch(e){}}
+function lsSet(){if(S.cuenta)return;try{localStorage.setItem(LS,JSON.stringify(S.clients.filter(c=>!c._new).map(c=>{if(S.faltaPerfil&&S.faltaPerfil.id===c.id){const g=snapDe(c);if(g){g.periods=c.periods;return g;}}return c;})));}catch(e){}}
 async function persist(c){
-  if(c._new)return;if(!(S.dirty&&S.dirtyId===c.id))fijarSnap(c);lsSet();
+  if(c._new)return;if(!(S.dirty&&S.dirtyId===c.id))fijarSnap(c);
+  if(S.cuenta){await cuentaGuardar(c);return;}   // con cuenta, el cliente va a la nube de la firma y no al navegador
+  lsSet();
   if(S.db){try{const o=clone(c);delete o._new;await S.db.doc('clients/'+c.id).set(o);}catch(e){toast('No pude guardar en el espacio compartido; quedó en este navegador.');}}
 }
 let tmr=null;function persistSoon(){clearTimeout(tmr);tmr=setTimeout(()=>{const c=cur();if(c)persist(c);},600);}
@@ -13011,6 +13208,7 @@ function migrate(c){if(c.software==null)c.software='';else if(c.software&&!adapt
   const conBal=!!(c.ctasBalance&&c.ctasBalance.ctas&&c.ctasBalance.ctas.length);   // con un balance cargado, las filas que no aparecen en él se quitaron a propósito: no se reponen
   if(!conBal)[['236703','IVA 132'],['236704','IVA 131']].forEach(([p,k])=>{if(!c.rules.some(r=>String(r.p)===p))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='2367')),0,{p,c:k,m:0});});c.rules.forEach(r=>{if(r.c==='RTE IVA')r.c='IVA 131';if(r.c==='EXTERIOR')r.c='EXTERIOR SIN CONVENIO';});if(c.tarifaEsp==null)c.tarifaEsp='';if(c.tipoPersona==null)c.tipoPersona='';if(!conBal&&!c.rules.some(r=>String(r.p)==='23653001'))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='236530')),0,{p:'23653001',c:'ARRENDAMIENTOS',m:0});}
 async function initStore(){
+  if(cuentasCfg()&&!cuentasModoLocal())return cuentasInit();   // con cuentas: nada se lee del navegador hasta entrar a una firma
   S.clients=lsGet();S.clients.forEach(migrate);render();
   try{if(window.claude&&window.claude.use){S.db=await window.claude.use('db');S.dl=await window.claude.use('downloads');}}catch(e){S.db=null;}
   if(S.db){
@@ -13423,6 +13621,7 @@ function etiquetasCliente(c){const t=[];if(c.iva==='Sí')t.push('IVA');if(c.icaR
 /* Obligaciones del mes en curso cuya revisión no está completa (contador de «Pendientes del mes») */
 function pendMesCount(){const cals=allCals(),mes=hoyISO().slice(0,7);let n=0;for(const c of S.clients){if(c._new||!c.razon)continue;for(const o of obligacionesCliente(c,cals)){if(o.fecha.slice(0,7)!==mes)continue;if(estadoRevision(c,periodoKey(o.imp,o.id),o.imp).k!=='ok')n++;}}return n;}
 function respaldoInfo(){
+  if(cuentaFirma())return{k:'ok',t:'Firma: '+cuentaFirma().nombre,s:'Los clientes se guardan en la nube de la firma; los archivos del mes no.'};
   if(S.mode==='equipo')return{k:'ok',t:'Espacio compartido',s:'Los clientes se guardan en el equipo.'};
   let iso=null;try{iso=localStorage.getItem('mesa_ultimo_respaldo');}catch(e){}
   if(!iso)return{k:'warn',t:'Sin respaldo todavía',s:'Exporta para no perder tu trabajo.'};
@@ -13447,7 +13646,7 @@ async function eliminarCliente(id,silencio){
   const x=S.clients.find(c=>c.id===id);if(!x)return;
   S.clients=S.clients.filter(c=>c.id!==id);limpiarDel();
   if(S.id===id){S.id=null;S.data={};S.results=null;resetRica();resetIca();resetForm();}
-  lsSet();if(S.db&&!x._new){try{await S.db.doc('clients/'+id).delete();}catch(err){}}
+  lsSet();if(S.cuenta&&!x._new)await cuentaBorrar(id);if(S.db&&!x._new){try{await S.db.doc('clients/'+id).delete();}catch(err){}}
   render();if(!silencio)toast('Cliente eliminado.');
 }
 function render(){
@@ -13458,15 +13657,15 @@ function render(){
   const inicio=enInicio();   // la barra muestra solo el cliente que se está editando; los demás se buscan o se abren desde el tablero
   const buscador=total>=2?`<div class=\"buscar\">${ICO.search}<input type=\"search\" id=\"filtro\" data-c=\"filtro\" placeholder=\"Buscar cliente o NIT\" value=\"${esc(S.filtro)}\" aria-label=\"Buscar cliente por nombre o NIT\" autocomplete=\"off\"></div>`:'';
   const bloqueRail=buscador+`<div id=\"railbody\">${railBodyUno(list,qf)}</div>`;
-  rail.innerHTML=`<div class="brandbox"><div class="brandlogo-card"><img class="brandlogo" src="${LOGO_TRIBUTEK}" width="150" height="100" alt="Tributek · Revisión de impuestos" title="Retención, IVA, ICA y ReteICA"></div><div class="brandtxt"><h1>Revisión de impuestos</h1><p class="brand">Retención, IVA, ICA y ReteICA</p></div></div>
+  rail.innerHTML=`<div class="brandbox"><div class="brandlogo-card"><img class="brandlogo" src="${LOGO_TRIBUTEK}" width="150" height="100" alt="Tributek · Revisión de impuestos" title="Retención, IVA, ICA y ReteICA"></div><div class="brandtxt"><h1>Revisión de impuestos</h1><p class="brand">${cuentaFirma()?esc(cuentaFirma().nombre)+' · '+esc(ROL_TXT[cuentaFirma().rol]||cuentaFirma().rol):'Retención, IVA, ICA y ReteICA'}</p></div></div>
   <div class="railacts"><button class="nav-item" data-a="home" ${inicio&&S.view!=='pend'&&S.view!=='norma'?'aria-current="true"':''}>${ICO.grid}<span>Inicio · todos los clientes</span></button>
   <button class="nav-item" data-a="pend" ${S.view==='pend'?'aria-current="true"':''}>${ICO.cal}<span>Pendientes del mes</span>${pn?`<span class="badge" title="${pn} por revisar este mes" aria-label="${pn} pendientes por revisar este mes">${pn}</span>`:''}</button>
   <button class="nav-item" data-a="norma" ${S.view==='norma'?'aria-current="true"':''}>${ICO.doc}<span>Normatividad utilizada</span>${nn?`<span class="badge" title="${nn} fuente(s) por actualizar" aria-label="${nn} fuentes de normatividad por actualizar">${nn}</span>`:''}</button>
-  <button class="btn rail-btn primary" data-a="new">${ICO.plus}Nuevo cliente</button></div>
+  <button class="btn rail-btn primary" data-a="new" ${cuentaFirma()&&cuentaFirma().rol==='lectura'?'disabled title="Tu rol es de solo lectura"':''}>${ICO.plus}Nuevo cliente</button></div>
   ${bloqueRail}
   <div class="foot">
    ${hayCli?`<div class="resp ${rs.k}"><span class="dot" aria-hidden="true"></span><div><b>${esc(rs.t)}</b><small>${esc(rs.s)}</small></div></div>`:''}
-   <div class="resp-acts">${hayCli?`<button class="btn rail-btn quiet" data-a="export" title="Descargar un respaldo de todos los clientes">${ICO.down}Exportar</button>`:''}<span class="btn rail-btn quiet file" title="Cargar un respaldo de clientes">${ICO.up}Importar<input type="file" accept=".json,application/json" data-c="import" aria-label="Importar clientes"></span></div>
+   ${cuentaFirma()?cuentaRailActs():`<div class="resp-acts">${hayCli?`<button class="btn rail-btn quiet" data-a="export" title="Descargar un respaldo de todos los clientes">${ICO.down}Exportar</button>`:''}<span class="btn rail-btn quiet file" title="Cargar un respaldo de clientes">${ICO.up}Importar<input type="file" accept=".json,application/json" data-c="import" aria-label="Importar clientes"></span></div>`}
    <details class="guia" ${total?'':'open'}><summary>Guía rápida</summary><ol>
     <li><b>Crea el cliente</b> y completa su perfil: NIT, municipio, IVA, ICA y agente de retención. De ahí salen sus vencimientos.</li>
     <li><b>Elige el impuesto y el período</b> en la parte superior.</li>
@@ -13475,6 +13674,7 @@ function render(){
     <li><b>Pendientes del mes</b> muestra qué vence y qué falta por revisar.</li></ol><p class="nota">${S.mode==='equipo'?'Los clientes se guardan en el espacio compartido del equipo.':'Tus clientes se guardan solo en este navegador: respáldalos con Exportar.'} Los archivos que cargas no se almacenan.</p></details>
 </div>
   <p class=\"credito\">Desarrollado por: Karol Tatiana Lesmes</p>`;
+  if(S.view==='firma'&&cuentaFirma()){main.innerHTML=viewFirma();return;}
   if(S.view==='norma'){main.innerHTML=bannerRespaldo()+viewNorma();return;}
   if(S.view==='pend'){main.innerHTML=bannerRespaldo()+viewPend();return;}
   const c=cur();
@@ -13492,7 +13692,7 @@ function render(){
    ${controlPeriodo(c)}</div>
    <div class="tabs imps" role="tablist" aria-label="Impuesto">${IMPS.map(i=>`<button role="tab" data-a="imp" data-t="${i}" aria-selected="${S.imp===i}">${IMP_NOMBRE[i]}</button>`).join('')}</div>
    <div class="tabs" role="tablist">${tabs.map(t=>`<button role="tab" data-a="tab" data-t="${t[0]}" aria-selected="${S.tab===t[0]}">${t[1]}</button>`).join('')}</div>
-   ${(S.tab==='archivos'||S.tab==='cliente')&&(S.imp==='reteica'?S.rica.results:S.imp==='ica'?S.ica.results:S.results)?`<div class="row dlbar"><span class="hint">Ya hay una revisión ejecutada para este período.</span><button class="btn ghost" data-a="dl">Descargar papel de trabajo (.xlsx)</button></div>`:''}
+   ${(S.tab==='archivos'||S.tab==='cliente')&&(S.imp==='reteica'?S.rica.results:S.imp==='ica'?S.ica.results:S.results)?`<div class="row dlbar"><span class="hint">Ya hay una revisión ejecutada para este período.</span><button class="btn ghost" data-a="dl">Descargar papel de trabajo (.xlsx)</button>${carpetaLinea()}</div>`:''}
    ${S.tab==='cliente'?tabCliente(c):((S.imp==='reteica'||S.imp==='ica')&&!S.per[S.imp])?tabChecklist(c):S.tab==='archivos'?(S.imp==='reteica'?tabArchivosR(c):S.imp==='ica'?tabArchivosI(c):tabArchivos(c)):S.tab==='validacion'?tabValidacion(c):tabChecklist(c)}`;
 }
 /* ########## SECCIÓN 7 · Tablero de clientes (pantalla de inicio) ########## */
@@ -13815,7 +14015,7 @@ function tabValidacion(c){
     const falta=!rica&&!ica?faltaCargar():'',avisoFalta=sinD.length&&falta?`<div class="panel"><p class="hint"><b>${esc(mt('RES-FALTA-001',{lista:falta}))}</b></p></div>`:'';
     const plegadas=sinD.length?`<details class="faltan"><summary><b>${sinD.length} revisiones sin datos</b> <span class="hint">· se activan al cargar más archivos; despliega para ver qué necesita cada una</span></summary>${sinD.map(resBlock).join('')}</details>`:'';
     return `<div class="summary"><div><strong>${n('err')}</strong><span>con error</span></div><div><strong>${n('warn')}</strong><span>por revisar</span></div><div><strong>${n('ok')}</strong><span>sin hallazgos</span></div><div><strong>${n('na')}</strong><span>sin datos para validar</span></div>${n('fallo')?`<div><strong>${n('fallo')}</strong><span>no se pudieron completar</span></div>`:''}</div>${notaNube}${avisoFalta}${verR.map(resBlock).join('')}${plegadas}
-     <div class="row" style="margin-top:14px"><button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="run" ${S.corriendo?'disabled':''}>${S.corriendo?'Revisando…':'Volver a ejecutar'}</button></div>`;}
+     <div class="row" style="margin-top:14px"><button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="run" ${S.corriendo?'disabled':''}>${S.corriendo?'Revisando…':'Volver a ejecutar'}</button>${carpetaLinea()}</div>`;}
   if(p.summary)return `<div class="panel"><h3>Última revisión guardada</h3><p class="hint">Ejecutada el ${esc(new Date(p.ranAt).toLocaleString('es-CO'))}. Es solo el resumen: vuelve a cargar los archivos para ver el detalle.</p>${p.summary.map(r=>`<p><span class="chip ${r.estado}">${ST[r.estado]}</span> <b>${esc(r.titulo)}</b><br><span class="hint">${esc(r.resumen)}</span></p>`).join('')}</div>`;
   return ica?`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para este período de ICA</h2><p>Carga el balance, digita la declaración y ejecuta la validación en la pestaña de archivos.</p><button class="btn" data-a="tab" data-t="archivos">Ir a los archivos</button></div>`:rica?`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para el ${b.n}.º bimestre de ${b.anio}</h2><p>Carga el balance y el borrador del formulario 131 en la pestaña Archivos del bimestre y ejecuta la validación.</p><button class="btn" data-a="tab" data-t="archivos">Ir a Archivos del bimestre</button></div>`
    :`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para ${esc(S.period)}</h2><p>Carga el balance y el borrador del 350 en la pestaña Archivos del mes y ejecuta la validación.</p><button class="btn" data-a="tab" data-t="archivos">Ir a Archivos del mes</button></div>`;
@@ -13914,8 +14114,8 @@ async function downloadRica(){
   try{
     const p=pdata();const ctx=buildCtxR(),D=S.rica.data;
     const d=datosPapelRica(ctx,S.rica.results,{ck:p.ck,cierre:p.cierre,loaded:{bal:!!(D.bal&&D.bal.parsed),f131:hasF131(),led:!!(D.led&&D.led.parsed),det:!!(D.det&&D.det.parsed)}});
-    const wb=buildPapelRica(window.ExcelJS,d);const buf=await wb.xlsx.writeBuffer();
-    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    const wb=buildPapelRica(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
+    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel de la retención de ICA.');}
 }
 /* ########## SECCIÓN 10 · Pantallas del ICA (102) ########## */
@@ -14063,8 +14263,8 @@ async function downloadIca(){
   try{
     const p=pdata(),ctx=buildCtxI(),D=S.ica.data;
     const d=datosPapelIca(ctx,S.ica.results,{ck:p.ck,cierre:p.cierre,loaded:{bal:!!(D.bal&&D.bal.parsed),led:!!(D.led&&D.led.parsed),det:!!(D.det&&D.det.parsed),cert:!!(D.cert&&D.cert.parsed),form:hasFormIca()}});
-    const wb=buildPapelIca(window.ExcelJS,d);const buf=await wb.xlsx.writeBuffer();
-    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    const wb=buildPapelIca(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
+    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel del ICA.');}
 }
 /* ########## SECCIÓN 11 · Checklist, descargas, respaldo e importación ########## */
@@ -14092,15 +14292,62 @@ function tabChecklist(c){
   let oblig='';
   if(!ret){const per=periodosActual(c).find(x=>x.id===S.per[imp]);const ch=per?chipVence(per.fecha):null;
     oblig=`<div class="panel"><h3>${esc(IMP_NOMBRE[imp])} · ${esc(per?per.txt:'')}</h3><p class="hint">${per?'Vence el '+esc(fmtFecha(per.fecha))+' <span class="chip '+ch.k+'">'+esc(ch.t)+'</span> · ':''}Calendario: ${imp==='iva'?'DIAN (según el último dígito del NIT)':'Secretaría de Hacienda de Bogotá'}. ${imp==='reteica'||imp==='ica'?'Carga los archivos del período y ejecuta la validación: las actividades con cruce automático se llenan solas.':'Las actividades de este impuesto son un borrador editable por la firma y todavía no tienen cruces automáticos: se marcan y comentan a mano.'}</p></div>`;}
-  const hayRes=ret?S.results:imp==='ica'?S.ica.results:S.rica.results;const dl=conVal?`<button class="btn" data-a="dl" ${hayRes?'':'disabled'}>Descargar papel de trabajo (.xlsx)</button>${hayRes?'':'<span class="hint">Ejecuta la validación para generar el papel de trabajo.</span>'}`:'<button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button>';
+  const hayRes=ret?S.results:imp==='ica'?S.ica.results:S.rica.results;const dl=(conVal?`<button class="btn" data-a="dl" ${hayRes?'':'disabled'}>Descargar papel de trabajo (.xlsx)</button>${hayRes?'':'<span class="hint">Ejecuta la validación para generar el papel de trabajo.</span>'}`:'<button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button>')+carpetaLinea();
   return `${panelCierre(c)}${oblig}<div class="panel"><h3>Datos de la visita</h3><div class="grid"><div class="f"><label for="mv">Fecha de visita</label><input id="mv" type="date" data-c="meta" data-m="visita" value="${esc(p.meta.visita)}"></div><div class="f"><label for="mc">Fecha de corte <span class="hint">(hasta cuándo están cerrados los libros que revisas)</span></label><input id="mc" type="date" data-c="meta" data-m="corte" value="${esc(p.meta.corte)}"></div></div></div>
   <div class="panel"><h3>Checklist de revisión${conVal?'':' · borrador'}</h3><p class="hint">${conVal?'Las filas automáticas se llenan al ejecutar la validación. Tú marcas el resultado final y dejas comentarios.':'Marca el resultado de cada actividad y deja comentarios. Los cambios se guardan solos.'}</p><div class="scroll ck"><table><thead><tr><th>Actividad</th><th>Resultado automático</th><th>Revisado</th><th>Comentarios</th></tr></thead><tbody>${rows}</tbody></table></div></div>
   <div class="row">${dl}</div>`;
 }
 /* ---- exportación ---- */
-async function saveFile(fname,blob){
+/* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
+   El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
+   Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
+const APP_ENTREGA='fase4b-entrega34';
+const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
+function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
+  rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
+async function carpetaCargar(){try{if(!carpetaSoportada())return;const h=await idbCarpeta('get');if(h&&h.kind==='directory'){S.carpeta={h,nombre:h.name};render();}}catch(e){}}
+async function carpetaElegir(){
+  try{const h=await window.showDirectoryPicker({id:'tributek',mode:'readwrite'});await idbCarpeta('set',h);S.carpeta={h,nombre:h.name};render();toast(mt('CAR-TRB-001',{carpeta:h.name}));}
+  catch(e){if(e&&e.name==='AbortError')return;toast(mt('CAR-TRB-004'));}
+}
+async function carpetaQuitar(){try{await idbCarpeta('del');}catch(e){}S.carpeta=null;S.carpetaPerm=null;render();toast('Quité la carpeta de trabajo. Los archivos que ya estaban en ella siguen ahí.');}
+/* Se pide el permiso apenas la persona pulsa «Descargar» (antes de generar el Excel), para no perder el gesto del clic */
+function carpetaPrepara(){S.carpetaPerm=null;const h=S.carpeta&&S.carpeta.h;if(!h)return;
+  S.carpetaPerm=(async()=>{try{let p=await h.queryPermission({mode:'readwrite'});if(p!=='granted')p=await h.requestPermission({mode:'readwrite'});return p==='granted';}catch(e){return false;}})();}
+const nombreSeguro=t=>{let x=String(t==null?'':t).replace(/[\\/:*?"<>|\u0000-\u001f]/g,' ').replace(/\s+/g,' ').trim().slice(0,40).replace(/[. ]+$/,'');return !x||/^\.+$/.test(x)?'cliente':x;};
+const MESES_CARPETA=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function periodoCarpeta(){
+  const id=S.imp==='retefuente'?S.period:S.per[S.imp];let m;
+  if(m=/^(\d{4})-(\d{2})$/.exec(id||''))return[m[1],m[2]+' - '+(MESES_CARPETA[+m[2]-1]||m[2])];
+  if(m=/^(\d{4})-([BC])(\d)$/.exec(id||''))return[m[1],(m[2]==='B'?'Bimestre ':'Cuatrimestre ')+m[3]];
+  return[nombreSeguro(String(id||'').slice(0,4)||'Sin período'),nombreSeguro(id||'Sin período')];
+}
+function rutaCarpeta(c){const nit=String(c.nit||'').split('-')[0].replace(/\D/g,'');return[nombreSeguro((c.razon||'cliente')+(nit?' - '+nit:''))].concat(periodoCarpeta());}
+function registroUltima(c,fname){
+  const R=S.imp==='retefuente'?(S.results||[]):[],n=e=>R.filter(r=>r.estado===e).length,p=pdata();
+  return{aplicacion:'Tributek',entrega:APP_ENTREGA,generado:new Date().toISOString(),impuesto:IMP_NOMBRE[S.imp]||S.imp,periodo:S.imp==='retefuente'?S.period:S.per[S.imp],cliente:{razonSocial:c.razon||'',nit:c.nit||''},archivo:fname,
+    resultado:{en_orden:n('ok'),por_revisar:n('warn'),con_hallazgo:n('err'),sin_datos:n('na')},revisiones:R.map(r=>({revision:r.titulo,estado:r.estado})),checklist:p.ck||{},cierre:p.cierre||null};
+}
+async function guardarUltimaVersion(fname,blob){
+  const h=S.carpeta&&S.carpeta.h;if(!h)return null;
+  try{
+    if(!(await (S.carpetaPerm||Promise.resolve(false))))return{err:'permiso'};
+    const c=cur(),ruta=rutaCarpeta(c);let dir=h;for(const t of ruta)dir=await dir.getDirectoryHandle(t,{create:true});
+    const fh=await dir.getFileHandle(fname,{create:true}),w=await fh.createWritable();await w.write(blob);await w.close();
+    const rf=await dir.getFileHandle('Registro de la última revisión - '+nombreSeguro(IMP_NOMBRE[S.imp]||S.imp)+'.json',{create:true}),w2=await rf.createWritable();await w2.write(JSON.stringify(registroUltima(c,fname),null,1));await w2.close();
+    return{ok:true,ruta:[h.name].concat(ruta).join(' / ')};
+  }catch(e){return{err:(e&&e.name)||'error'};}
+}
+function carpetaLinea(){   // junto al botón de descarga del check list (no en la barra lateral, que ya va justa de alto)
+  if(!carpetaSoportada())return '';
+  const k=S.carpeta;
+  return k?`<span class="hint carpeta-estado">Se guarda también en la carpeta «${esc(k.nombre)}».</span><button class="btn ghost" data-a="carpeta" title="Elegir otra carpeta de trabajo">Cambiar carpeta</button><button class="btn ghost" data-a="carpetaquitar" title="Dejar de guardar en una carpeta">Quitar</button>`
+   :`<button class="btn ghost" data-a="carpeta" title="Elegir una carpeta donde se guarde también la última versión de cada check list">Guardar también en una carpeta…</button>`;
+}
+async function saveFile(fname,blob,lista){
   if(S.dl){try{await S.dl.save({filename:fname,data:blob});toast('Archivo guardado.');}catch(e){if(!e||e.code!=='declined')toast('No se pudo guardar el archivo.');}}
   else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;document.body.appendChild(a);a.click();a.remove();toast(mt('EXP-DESC-001',{archivo:fname}));}
+  if(lista&&S.carpeta){const r=await guardarUltimaVersion(fname,blob);if(r&&r.ok)toast(mt('CAR-TRB-002',{ruta:r.ruta}));else if(r)toast(mt('CAR-TRB-003'));}   // solo los check list; el respaldo de clientes no va a la carpeta
 }
 async function exportClients(){
   const list=S.clients.filter(c=>!c._new).map(c=>{const o=JSON.parse(JSON.stringify(c));delete o._new;return o;});
@@ -14138,11 +14385,12 @@ async function downloadGenerico(){
   try{
     const c=cur(),p=pdata();const per=periodosActual(c).find(x=>x.id===S.per[S.imp]);if(!per){toast('No hay período seleccionado.');return;}
     const d=datosPapelGenerico({client:c,meta:p.meta,imp:S.imp,per,ck:p.ck,cierre:p.cierre});
-    const wb=buildPapelGenerico(window.ExcelJS,d);const buf=await wb.xlsx.writeBuffer();
-    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    const wb=buildPapelGenerico(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
+    await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel de este impuesto.');}
 }
 async function download(){
+  carpetaPrepara();
   if(S.imp==='reteica')return downloadRica();
   if(S.imp==='ica')return downloadIca();
   if(S.imp!=='retefuente')return downloadGenerico();
@@ -14150,9 +14398,9 @@ async function download(){
   try{
     const p=pdata();const ctx=buildCtx();
     const d=datosPapel(ctx,S.results,{form:S.form,auto:S.auto,ivaC:S.ivaC,ex:S.ex,ck:p.ck,cierre:p.cierre,movRaw:(S.data.led&&S.data.led.parsed&&S.data.led.parsed.movRaw)||null,loaded:{bal:!!(S.data.bal&&S.data.bal.parsed),form:hasForm(),led:!!(S.data.led&&S.data.led.parsed),det:!!(S.data.det&&S.data.det.parsed),dian:!!(S.data.dian&&S.data.dian.parsed),nom:!!(S.data.nom&&S.data.nom.parsed)}});
-    const wb=buildPapelTrabajo(window.ExcelJS,d);
+    const wb=buildPapelTrabajo(window.ExcelJS,marcaFirma(d));
     const buf=await wb.xlsx.writeBuffer();
-    await saveFile(nombreArchivo(d),new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    await saveFile(nombreArchivo(d),new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel con formato; se genera una versión simple.');return downloadSimple();}
 }
 
@@ -14196,7 +14444,7 @@ function hayCambiosSinGuardar(){if(S.tab==='cliente'&&S.view==='cliente')collect
   const c=cur();return !!((S.dirty&&c&&!c._new&&S.dirtyId===c.id)||borradoresConDatos([]).length);}
 window.addEventListener('beforeunload',e=>{let hay=false;try{hay=hayCambiosSinGuardar();}catch(err){hay=false;}if(hay){e.preventDefault();e.returnValue='';}});   // un error interno nunca debe impedir cerrar
 function bannerRespaldo(){
-  if(S.mode==='equipo'||S.respOculto||!S.clients.some(c=>!c._new))return '';
+  if(S.mode==='equipo'||S.cuenta||S.respOculto||!S.clients.some(c=>!c._new))return '';
   let iso=null;try{iso=localStorage.getItem('mesa_ultimo_respaldo');}catch(e){}
   const d=iso?Math.floor((Date.now()-new Date(iso).getTime())/86400000):null;if(iso&&d<=7)return '';
   const m=iso?msg('RSP-ANT-001',{dias:d===1?'1 día':d+' días'}):msg('RSP-NUN-001',{});
@@ -14266,6 +14514,8 @@ document.addEventListener('click',async e=>{
   else if(a==='run'){await ejecutarConEstado();}
   else if(a==='dl'){download();}
   else if(a==='export'){exportClients();}
+  else if(a==='carpeta'){carpetaElegir();}
+  else if(a==='carpetaquitar'){carpetaQuitar();}
 });
 document.addEventListener('toggle',e=>{const d=e.target;if(!d||!d.classList)return;if(d.classList.contains('avanzadas'))S.avanz=d.open;else if(d.classList.contains('cuentasdet'))S.avanzCuentas=d.open;},true);
 document.addEventListener('input',e=>{
@@ -14318,8 +14568,182 @@ document.addEventListener('change',async e=>{
   else if(k==='meta'){pdata().meta[el.dataset.m]=el.dataset.num!==undefined?(()=>{const n=leerNum(el.value);return n==null?'':String(n);})():el.value;persistSoon();}
   else if(k==='ck'){const p=pdata();const o=p.ck[el.dataset.id]=p.ck[el.dataset.id]||{};o[el.dataset.f]=el.value;persistSoon();}
 });
+/* ########## SECCIÓN 14 · Cuentas y firmas (opcional): ingreso, firma activa, miembros y clientes en la nube ########## */
+/* Con la configuración de Supabase (window.TRIBUTEK_CONFIG = {supabaseUrl, supabaseAnonKey}) la app pide ingreso y trabaja DENTRO de una firma: los perfiles de clientes se guardan en la nube de esa firma
+   (supabase/esquema.sql: reglas por fila; una firma nunca ve a otra) y NADA de la firma se lee ni se escribe en el almacenamiento local del navegador.
+   Los archivos del mes y los Excel siguen procesándose en el navegador. Sin configuración la app funciona como siempre (modo local). El cliente de la nube solo usa «auth» y «rpc». */
+const CUENTAS_LIB='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js';
+const CUENTAS_SRI='sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK';
+const ROL_TXT={administradora:'Administradora',revisora:'Revisora',lectura:'Lectura'};
+const cuentasCfg=()=>{const c=window.TRIBUTEK_CONFIG||{};return c.supabaseUrl&&c.supabaseAnonKey?c:null;};
+const cuentasModoLocal=()=>{try{return sessionStorage.getItem('tributek_local')==='1';}catch(e){return false;}};
+const cuentasRecargar=()=>{if(window.__sinRecarga){window.__recargado=true;return;}location.reload();};
+const cuentaFirma=()=>S.cuenta&&S.cuenta.firma;
+function cuentasLib(){return new Promise((res,rej)=>{if(window.supabase&&window.supabase.createClient)return res();const s=document.createElement('script');s.src=CUENTAS_LIB;s.integrity=CUENTAS_SRI;s.crossOrigin='anonymous';s.onload=()=>res();s.onerror=()=>rej(new Error('Failed to fetch'));document.head.appendChild(s);});}
+async function cuentasCliente(){
+  if(S._sb)return S._sb;await cuentasLib();const c=cuentasCfg();let rec=false;try{rec=localStorage.getItem('tributek_recordar')==='1';}catch(e){}
+  S._sb=window.supabase.createClient(c.supabaseUrl,c.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storage:rec?localStorage:sessionStorage}});return S._sb;
+}
+const CTA_CODIGOS=['sin_permiso','conflicto_version','invitacion_invalida','codigo_registro_invalido','nombre_invalido','rol_invalido','correo_invalido','ya_es_miembro','es_la_duena','no_es_miembro','sin_sesion'];
+function cuentasError(e){
+  const m=String((e&&e.message)||e||'');let c='desconocido';const k=CTA_CODIGOS.find(x=>m.includes(x));
+  if(k)c=k;else if(/Invalid login credentials/i.test(m))c='credenciales';else if(/Email not confirmed/i.test(m))c='sin_confirmar';else if(/already registered|already been registered/i.test(m))c='ya_registrado';
+  else if(/Password should|weak password/i.test(m))c='clave_debil';else if(/Failed to fetch|NetworkError|fetch failed/i.test(m))c='sin_conexion';else if(/rate limit|too many/i.test(m))c='muchos_intentos';
+  const x=new Error(m);x.codigo=c;return x;
+}
+const CTA_MSG={credenciales:'CTA-ERR-001',sin_confirmar:'CTA-ERR-002',ya_registrado:'CTA-ERR-003',clave_debil:'CTA-ERR-004',sin_conexion:'CTA-ERR-005',invitacion_invalida:'CTA-ERR-006',codigo_registro_invalido:'CTA-ERR-007',sin_permiso:'CTA-ERR-008',conflicto_version:'CTA-ERR-009',es_la_duena:'CTA-ERR-010',nombre_invalido:'CTA-ERR-012',rol_invalido:'CTA-ERR-012',correo_invalido:'CTA-ERR-012',ya_es_miembro:'CTA-ERR-013',muchos_intentos:'CTA-ERR-014',sin_sesion:'CTA-ERR-015'};
+const cuentasTextoError=e=>mt(CTA_MSG[(e&&e.codigo)||'']||'CTA-ERR-011');
+async function nubeRpc(n,a){const cli=await cuentasCliente();const r=await cli.rpc(n,a||{});if(r.error)throw cuentasError(r.error);return r.data;}
+/* ---- ingreso ---- */
+const gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
+function gateMostrar(p,extra){S.gate=Object.assign({p,aviso:''},extra||{});gateDibujar();}
+function gateOcultar(){S.gate=null;const g=document.getElementById('gate');if(g)g.remove();document.body.classList.remove('gate-activo');}
+function gateCuerpo(){
+  const g=S.gate,av=g.aviso?`<p class="aviso" role="alert"><b>${esc(g.aviso)}</b></p>`:'',inv=S.invitacion&&(g.p==='entrar'||g.p==='crear')?'<p class="hint">Tienes una invitación pendiente: entra o crea tu cuenta con el correo al que llegó.</p>':'';
+  const campo=(id,et,tipo,extra)=>`<div class="f"><label for="${id}">${et}</label><input id="${id}" type="${tipo}" ${extra||''}></div>`,pol=(window.TRIBUTEK_CONFIG||{}).politicaUrl;
+  if(g.p==='cargando')return '<h3>Tributek</h3><p role="status">Cargando…</p>';
+  if(g.p==='entrar')return `<h3>Entrar a Tributek</h3><p class="gate-saludo">Ingresa con tu cuenta para continuar.</p>${av}${inv}${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña','password','autocomplete="current-password"')}<label class="chk"><input id="g_rec" type="checkbox"> Mantener la sesión en este equipo</label><div class="row"><button class="btn" data-a="cta-entrar">Entrar</button></div><p class="gate-o"><span>¿Primera vez?</span></p><div class="row"><button class="btn ghost" data-a="cta-ir-empresa">Crear empresa</button></div><p class="hint gate-enlaces"><button class="link" data-a="cta-ir-crear">Me invitaron a una empresa</button> · <button class="link" data-a="cta-ir-olvide">Olvidé mi contraseña</button></p><p class="hint">¿Solo quieres usar Tributek en este navegador, sin cuenta? <button class="link" data-a="cta-local">Usar sin cuenta</button></p>`;
+  if(g.p==='empresa')return `<h3>Crear empresa</h3>${av}<p class="gate-saludo">Creas tu empresa y tu cuenta de administradora en un solo paso.</p>${campo('g_empresa','Nombre de la empresa','text','maxlength="80" autocomplete="organization" value="'+esc(g.empresa||'')+'"')}${campo('g_correo','Tu correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña (mínimo 10 caracteres)','password','autocomplete="new-password"')}${campo('g_clave2','Repite la contraseña','password','autocomplete="new-password"')}${g.registroAbierto?'':campo('g_regcod','Código de registro (te lo entrega Tributek)','text','autocomplete="off" value="'+esc(g.codigo||'')+'"')}<label class="chk"><input id="g_acepto" type="checkbox"> Acepto el tratamiento de mis datos personales${pol?` (<a href="${esc(pol)}" target="_blank" rel="noopener">política</a>)`:''}</label><div class="row"><button class="btn" data-a="cta-crearempresa">Crear empresa</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Ya tengo cuenta: entrar</button></p>`;
+  if(g.p==='crear')return `<h3>Crear cuenta</h3>${av}${inv}<p class="hint">Esta cuenta es para unirte a una empresa que ya existe, con una invitación. Para crear una empresa nueva, usa <button class="link" data-a="cta-ir-empresa">Crear empresa</button>. Tu cuenta guarda tu correo y los perfiles de los clientes de la firma; los archivos del mes no salen de tu navegador.</p>${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña (mínimo 10 caracteres)','password','autocomplete="new-password"')}${campo('g_clave2','Repite la contraseña','password','autocomplete="new-password"')}<label class="chk"><input id="g_acepto" type="checkbox"> Acepto el tratamiento de mis datos personales${pol?` (<a href="${esc(pol)}" target="_blank" rel="noopener">política</a>)`:''}</label><div class="row"><button class="btn" data-a="cta-crear">Crear cuenta</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Ya tengo cuenta: entrar</button></p>`;
+  if(g.p==='olvide')return `<h3>Recuperar contraseña</h3>${av}${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}<div class="row"><button class="btn" data-a="cta-olvide">Enviar enlace</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Volver a entrar</button></p>`;
+  if(g.p==='nueva_clave')return `<h3>Nueva contraseña</h3>${av}${campo('g_clave','Contraseña nueva (mínimo 10 caracteres)','password','autocomplete="new-password"')}<div class="row"><button class="btn" data-a="cta-nuevaclave">Guardar contraseña</button></div>`;
+  if(g.p==='selector')return `<h3>¿En qué firma vas a trabajar?</h3>${av}<div class="gate-firmas">${(S.cuenta.firmas||[]).map(f=>`<button class="btn ghost" data-a="cta-elegir" data-f="${esc(f.firma_id)}">${esc(f.nombre)} · ${esc(ROL_TXT[f.rol]||f.rol)}</button>`).join('')}</div><p class="hint"><button class="link" data-a="cta-salir">Cerrar sesión</button></p>`;
+  if(g.p==='sin_firma')return `<h3>Tu cuenta aún no pertenece a una firma</h3>${av}<p class="hint">Entra a una firma con el código de invitación que te dio tu administradora, o crea la tuya con un código de registro.</p><h4>Tengo una invitación</h4>${campo('g_invcod','Código de invitación','text','autocomplete="off"')}<div class="row"><button class="btn" data-a="cta-aceptar">Entrar a la firma</button></div><h4>Crear mi firma</h4>${campo('g_firma','Nombre de la firma','text','maxlength="80" autocomplete="organization" value="'+esc(g.firmaNombre||'')+'"')}${campo('g_regcod','Código de registro','text','autocomplete="off"')}<div class="row"><button class="btn" data-a="cta-crearfirma">Crear firma</button></div><p class="hint"><button class="link" data-a="cta-salir">Cerrar sesión</button></p>`;
+  return '';
+}
+const GATE_CHECK='<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function gateMarca(){return `<div class="gate-marca"><div class="gate-logo"><img src="${LOGO_TRIBUTEK}" width="220" height="147" alt="Tributek · Revisión de impuestos"></div><h1 class="gate-lema">Revisión de impuestos,<br>con criterio y trazabilidad</h1><p class="gate-sub">Cruza tu contabilidad con la DIAN y el formulario, y recibe un papel de trabajo listo para la visita.</p><ul class="gate-lineas"><li>${GATE_CHECK}<span>Cada firma ve únicamente sus propios clientes.</span></li><li>${GATE_CHECK}<span>Tus archivos se revisan en tu navegador: no se suben.</span></li><li>${GATE_CHECK}<span>Un Excel de papel de trabajo con cada hallazgo explicado.</span></li></ul></div>`;}
+function gateDibujar(){
+  let g=document.getElementById('gate');if(!S.gate){if(g)g.remove();document.body.classList.remove('gate-activo');return;}
+  if(!g){g=document.createElement('div');g.id='gate';g.className='gate';g.setAttribute('role','dialog');g.setAttribute('aria-modal','true');g.setAttribute('aria-label','Ingreso a Tributek');document.body.appendChild(g);}
+  document.body.classList.add('gate-activo');   // mientras se pide el ingreso no se ve nada de la aplicación
+  g.innerHTML=`${gateMarca()}<div class="gate-panel"><div class="gatecard">${gateCuerpo()}</div><p class="gate-pie">© ${new Date().getFullYear()} Tributek · Revisión de impuestos</p></div>`;const f=g.querySelector('input:not([type=checkbox])');if(f&&!f.value)f.focus();
+}
+async function cuentasInit(){
+  S.clients=[];S.cuenta={usuario:null,firmas:[],firma:null};   // modo cuenta desde el primer momento: no se lee ningún cliente del navegador
+  try{const m=/#invitacion=([A-Za-z0-9]+)/.exec(location.hash||'');if(m){S.invitacion=m[1];history.replaceState(null,'',location.pathname+location.search);}}catch(e){}
+  render();gateMostrar('cargando');
+  try{const cli=await cuentasCliente();cli.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')gateMostrar('nueva_clave');});
+    const r=await cli.auth.getSession();if(r&&r.data&&r.data.session)return cuentasDespues();gateMostrar('entrar');}
+  catch(e){gateMostrar('entrar',{aviso:cuentasTextoError(cuentasError(e))});}
+}
+async function cuentasDespues(){
+  const cli=await cuentasCliente(),r=await cli.auth.getSession(),ses=r&&r.data&&r.data.session;if(!ses){gateMostrar('entrar');return;}
+  S.cuenta={usuario:{id:ses.user.id,correo:ses.user.email},firmas:[],firma:null};gateMostrar('cargando');
+  try{
+    let aviso='';if(S.invitacion){const cod=S.invitacion;S.invitacion=null;try{const id=await nubeRpc('aceptar_invitacion',{p_codigo:cod});try{sessionStorage.setItem('tributek_firma',id);}catch(e){}}catch(e){aviso=cuentasTextoError(e);}}
+    const fs=await nubeRpc('mis_firmas');S.cuenta.firmas=fs;
+    if(!fs.length){const meta=(ses.user&&ses.user.user_metadata)||{};if(meta.firma_nombre){   // viene de «Crear empresa»: se crea ahora, ya con el correo confirmado
+      try{const id=await nubeRpc('crear_firma',{p_nombre:meta.firma_nombre,p_codigo:meta.codigo_registro||''});try{await cli.auth.updateUser({data:{firma_nombre:null,codigo_registro:null}});}catch(e){}
+        S.cuenta.firmas=await nubeRpc('mis_firmas');const nueva=S.cuenta.firmas.find(x=>x.firma_id===id);if(nueva){await cuentasEntrar(nueva);return toast(mt('CTA-INF-001',{firma:cuentaNombre(nueva)}));}}
+      catch(e){return gateMostrar('sin_firma',{aviso:cuentasTextoError(e),firmaNombre:meta.firma_nombre});}}}
+    let ya=null;try{ya=fs.find(x=>x.firma_id===sessionStorage.getItem('tributek_firma'));}catch(e){}
+    if(ya)return cuentasEntrar(ya);if(fs.length===1)return cuentasEntrar(fs[0]);if(fs.length>1)return gateMostrar('selector',{aviso});gateMostrar('sin_firma',{aviso});
+  }catch(e){gateMostrar('entrar',{aviso:cuentasTextoError(e)});}
+}
+async function cuentasEntrar(f){
+  gateMostrar('cargando');
+  try{const filas=await nubeRpc('listar_clientes',{p_firma:f.firma_id});S.cver={};S.snap={};S.clients=filas.map(x=>{const c=x.datos&&typeof x.datos==='object'?x.datos:{};c.id=c.id||x.cliente_id;S.cver[x.cliente_id]=x.version;return c;});S.clients.forEach(migrate);
+    S.cuenta.firma=f;S.cuenta.panel=null;try{sessionStorage.setItem('tributek_firma',f.firma_id);}catch(e){}S.id=null;S.view='home';S.carpeta=null;gateOcultar();render();carpetaCargar();}
+  catch(e){gateMostrar('entrar',{aviso:cuentasTextoError(e)});}
+}
+async function cuentasSalir(){
+  try{const cli=await cuentasCliente();await cli.auth.signOut();}catch(e){}
+  try{sessionStorage.removeItem('tributek_firma');}catch(e){}
+  S.clients=[];S.snap={};S.data={};S.results=null;S.cuenta=null;S.cver={};S.id=null;gateOcultar();cuentasRecargar();   // se recarga la página para que no quede nada de la firma en memoria
+}
+/* ---- clientes en la nube (se guardan de a uno, en orden, con control de versión) ---- */
+function cuentaGuardar(c){
+  const id=c.id,f=cuentaFirma();if(!f)return Promise.resolve();
+  if(f.rol==='lectura'){if(!S._avisoLectura){S._avisoLectura=true;toast(mt('CTA-ERR-008'));}return Promise.resolve();}
+  const o=clone(c);delete o._new;S.cq=S.cq||{};
+  S.cq[id]=(S.cq[id]||Promise.resolve()).then(async()=>{try{S.cver[id]=await nubeRpc('guardar_cliente',{p_firma:f.firma_id,p_cliente:id,p_datos:o,p_version:S.cver[id]||0});}catch(e){await cuentaFallo(e,id);}});
+  return S.cq[id];
+}
+async function cuentaFallo(e,id){
+  if(e.codigo==='sin_sesion'){gateMostrar('entrar',{aviso:cuentasTextoError(e)});return;}
+  toast(cuentasTextoError(e));
+  if(e.codigo==='conflicto_version'){try{const f=cuentaFirma(),filas=await nubeRpc('listar_clientes',{p_firma:f.firma_id}),x=filas.find(r=>r.cliente_id===id);const i=S.clients.findIndex(c=>c.id===id);
+    if(x&&i>=0){const c=x.datos;c.id=c.id||x.cliente_id;migrate(c);S.clients[i]=c;S.cver[id]=x.version;S.snap=S.snap||{};delete S.snap[id];S.dirty=false;render();}}catch(e2){}}
+}
+async function cuentaBorrar(id){const f=cuentaFirma();if(!f)return;try{await nubeRpc('borrar_cliente',{p_firma:f.firma_id,p_cliente:id});delete S.cver[id];}catch(e){await cuentaFallo(e,id);}}
+const marcaFirma=d=>{const f=cuentaFirma();if(f){d.firmaNombre=f.nombre;d.pieExcel=f.pie_excel||'';}return d;};   // el nombre de la firma va en el pie y el autor del Excel (en vez de «HB Consultores»)
+/* ---- Mi firma ---- */
+async function cuentasPanel(){
+  const f=cuentaFirma();if(!f)return;const P={miembros:[],invitaciones:[],bitacora:[],ultima:(S.cuenta.panel&&S.cuenta.panel.ultima)||null};
+  try{P.miembros=await nubeRpc('listar_miembros',{p_firma:f.firma_id});if(f.rol==='administradora'){P.invitaciones=await nubeRpc('listar_invitaciones',{p_firma:f.firma_id});P.bitacora=await nubeRpc('bitacora_firma',{p_firma:f.firma_id,p_limite:50});}}catch(e){await cuentaFallo(e,'');}
+  S.cuenta.panel=P;S.view='firma';render();
+}
+const BIT_TXT={firma_creada:'Se creó la firma',invitacion_creada:'Se creó una invitación',miembro_agregado:'Se agregó un miembro',cliente_creado:'Se creó un cliente',cliente_borrado:'Se borró un cliente',rol_cambiado:'Se cambió el rol de un miembro',miembro_quitado:'Se quitó a un miembro',miembro_salio:'Una persona salió de la firma',firma_cerrada:'Se cerró la firma'};
+function viewFirma(){
+  const C=S.cuenta,f=C&&C.firma;if(!f)return '<div class="panel"><p>No hay una firma activa.</p></div>';
+  const adm=f.rol==='administradora',P=C.panel||{miembros:[],invitaciones:[],bitacora:[]},quien=id=>{const m=P.miembros.find(x=>x.usuario_id===id);return m?m.correo:'una persona';};
+  const opciones=sel=>Object.keys(ROL_TXT).map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROL_TXT[r]}</option>`).join('');
+  const fila=m=>`<tr><td>${esc(m.correo)}${m.es_dueno?' <span class="badge">Dueña</span>':''}</td><td>${adm&&!m.es_dueno?`<select data-cta="rol" data-u="${esc(m.usuario_id)}" aria-label="Rol de ${esc(m.correo)}">${opciones(m.rol)}</select>`:esc(ROL_TXT[m.rol]||m.rol)}</td><td>${adm&&!m.es_dueno?`<button class="btn ghost" data-a="cta-quitar" data-u="${esc(m.usuario_id)}" data-c="${esc(m.correo)}">Quitar</button>`:''}</td></tr>`;
+  const inv=i=>`<tr><td>${esc(i.correo)}</td><td>${esc(ROL_TXT[i.rol]||i.rol)}</td><td>${esc(String(i.vence_el).slice(0,10))}</td><td><button class="btn ghost" data-a="cta-revocar" data-id="${esc(i.id)}">Revocar</button></td></tr>`;
+  return `<div class="panel"><h3>Mi firma · ${esc(f.nombre)}</h3><p class="hint">Tu rol: <b>${esc(ROL_TXT[f.rol]||f.rol)}</b>${f.es_dueno?' · eres la dueña de la firma':''}. Cada persona de la firma ve solo los clientes de esta firma; los archivos del mes no se guardan en la nube.</p>
+  ${adm?`<div class="grid"><div class="f"><label for="cta_nombre">Nombre de la firma</label><input id="cta_nombre" maxlength="80" value="${esc(f.nombre)}"></div><div class="f"><label for="cta_pie">Pie del Excel <span class="hint">(opcional; reemplaza «Generado con Revisión de impuestos…»)</span></label><input id="cta_pie" maxlength="200" value="${esc(f.pie_excel||'')}"></div></div><div class="row"><button class="btn" data-a="cta-guardarfirma">Guardar datos de la firma</button></div>`:''}</div>
+  <div class="panel"><h3>Miembros</h3><div class="scroll"><table><thead><tr><th>Correo</th><th>Rol</th><th></th></tr></thead><tbody>${P.miembros.map(fila).join('')}</tbody></table></div></div>
+  ${adm?`<div class="panel"><h3>Invitar a una persona</h3><p class="hint">Se crea un enlace de un solo uso, que vence en 7 días y solo sirve para el correo que escribas. Envíaselo por un medio seguro.</p><div class="grid"><div class="f"><label for="cta_icorreo">Correo de la persona</label><input id="cta_icorreo" type="email" autocomplete="off"></div><div class="f"><label for="cta_irol">Rol</label><select id="cta_irol">${opciones('revisora')}</select></div></div><div class="row"><button class="btn" data-a="cta-invitar">Crear invitación</button></div>
+  ${P.ultima?`<div class="aviso"><p><b>Invitación para ${esc(P.ultima.correo)}</b>: el enlace solo se muestra ahora. Guárdalo y envíaselo.</p><div class="row"><input id="cta_link" readonly value="${esc(P.ultima.link)}" aria-label="Enlace de invitación" style="flex:1;min-width:260px"><button class="btn ghost" data-a="cta-copiar">Copiar enlace</button></div></div>`:''}
+  ${P.invitaciones.length?`<div class="scroll"><table><thead><tr><th>Invitado</th><th>Rol</th><th>Vence</th><th></th></tr></thead><tbody>${P.invitaciones.map(inv).join('')}</tbody></table></div>`:'<p class="hint">No hay invitaciones pendientes.</p>'}</div>`:''}
+  <div class="panel"><h3>Respaldo de clientes</h3><p class="hint">Descarga una copia de los perfiles de clientes de esta firma, o carga una copia para agregar clientes.</p><div class="row"><button class="btn ghost" data-a="export">Exportar respaldo</button><span class="btn ghost file" title="Cargar un respaldo de clientes">Importar<input type="file" accept=".json,application/json" data-c="import" aria-label="Importar clientes"></span></div></div>
+  ${adm?`<div class="panel"><h3>Actividad reciente</h3>${P.bitacora.length?`<ul class="bitacora">${P.bitacora.map(b=>`<li>${esc(String(b.fecha).slice(0,16).replace('T',' '))} · ${esc(BIT_TXT[b.accion]||b.accion)} · ${esc(quien(b.usuario_id))}</li>`).join('')}</ul>`:'<p class="hint">Aún no hay actividad.</p>'}</div>`:''}
+  <div class="panel"><h3>Sesión</h3><div class="row"><button class="btn ghost" data-a="cta-cambiarfirma">Cambiar de firma</button>${f.es_dueno?'<button class="btn peligro" data-a="cta-cerrarfirma">Cerrar la firma</button>':'<button class="btn ghost" data-a="cta-salirfirma">Salir de esta firma</button>'}<button class="btn ghost" data-a="cta-salir">Cerrar sesión</button></div></div>`;
+}
+function cuentaRailActs(){return `<div class="resp-acts"><button class="btn rail-btn quiet" data-a="cta-firma" title="Miembros, invitaciones y datos de la firma">Mi firma</button><button class="btn rail-btn quiet" data-a="cta-salir" title="Cerrar la sesión en este equipo">Salir</button></div>`;}
+/* ---- acciones (se atienden antes que el resto de la pantalla) ---- */
+async function cuentasClick(a,b){
+  const f=cuentaFirma(),ir=(p,x)=>{gateMostrar(p,x);},gate=(p,aviso)=>gateMostrar(p,{aviso:aviso||'',correo:gv('g_correo'),empresa:gv('g_empresa'),codigo:gv('g_regcod'),registroAbierto:S.gate&&S.gate.registroAbierto});
+  try{
+    if(a==='cta-ir-empresa'){let ab=false;try{ab=!!(await nubeRpc('registro_abierto'));}catch(e){}return ir('empresa',{correo:gv('g_correo'),registroAbierto:ab});}
+    if(a==='cta-crearempresa'){
+      const nom=gv('g_empresa').trim(),correo=gv('g_correo').trim(),c1=gv('g_clave'),c2=gv('g_clave2'),cod=gv('g_regcod').trim(),ab=!!(S.gate&&S.gate.registroAbierto),ok=document.getElementById('g_acepto')&&document.getElementById('g_acepto').checked;
+      if(nom.length<2)return gate('empresa','Escribe el nombre de la empresa.');if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo))return gate('empresa','Escribe un correo válido.');if(c1.length<10)return gate('empresa',mt('CTA-ERR-004'));if(c1!==c2)return gate('empresa','Las dos contraseñas no coinciden.');
+      if(!ab&&!cod)return gate('empresa','Escribe el código de registro que te entregó Tributek.');if(!ok)return gate('empresa','Para crear la empresa debes aceptar el tratamiento de tus datos personales.');
+      const cli=await cuentasCliente(),r=await cli.auth.signUp({email:correo,password:c1,options:{emailRedirectTo:location.origin+location.pathname,data:{firma_nombre:nom,codigo_registro:ab?'':cod}}});   // el nombre y el código viajan con la cuenta: la empresa se crea sola en el primer ingreso
+      if(r.error)throw cuentasError(r.error);if(r.data&&r.data.session)return cuentasDespues();
+      return ir('entrar',{correo,aviso:'Te envié un correo para confirmar tu cuenta. Cuando lo confirmes y entres aquí, tu empresa «'+nom+'» se crea sola.'});}
+    if(a==='cta-ir-crear')return ir('crear',{correo:gv('g_correo')});if(a==='cta-ir-entrar')return ir('entrar',{correo:gv('g_correo')});if(a==='cta-ir-olvide')return ir('olvide',{correo:gv('g_correo')});
+    if(a==='cta-local'){try{sessionStorage.setItem('tributek_local','1');}catch(e){}S.cuenta=null;gateOcultar();S.clients=lsGet();S.clients.forEach(migrate);render();return;}
+    if(a==='cta-entrar'){const correo=gv('g_correo').trim(),clave=gv('g_clave'),rec=!!(document.getElementById('g_rec')&&document.getElementById('g_rec').checked);if(!correo||!clave)return gate('entrar','Escribe tu correo y tu contraseña.');
+      try{localStorage.setItem('tributek_recordar',rec?'1':'0');}catch(e){}S._sb=null;const cli=await cuentasCliente(),r=await cli.auth.signInWithPassword({email:correo,password:clave});if(r.error)throw cuentasError(r.error);return cuentasDespues();}
+    if(a==='cta-crear'){const correo=gv('g_correo').trim(),c1=gv('g_clave'),c2=gv('g_clave2'),ok=document.getElementById('g_acepto')&&document.getElementById('g_acepto').checked;
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo))return gate('crear','Escribe un correo válido.');if(c1.length<10)return gate('crear',mt('CTA-ERR-004'));if(c1!==c2)return gate('crear','Las dos contraseñas no coinciden.');if(!ok)return gate('crear','Para crear la cuenta debes aceptar el tratamiento de tus datos personales.');
+      const cli=await cuentasCliente(),r=await cli.auth.signUp({email:correo,password:c1,options:{emailRedirectTo:location.origin+location.pathname}});if(r.error)throw cuentasError(r.error);
+      if(r.data&&r.data.session)return cuentasDespues();return ir('entrar',{correo,aviso:'Te envié un correo para confirmar tu cuenta. Cuando lo confirmes, entra aquí con tu contraseña.'});}
+    if(a==='cta-olvide'){const correo=gv('g_correo').trim();if(!correo)return gate('olvide','Escribe tu correo.');const cli=await cuentasCliente();await cli.auth.resetPasswordForEmail(correo,{redirectTo:location.origin+location.pathname});return ir('entrar',{correo,aviso:'Si ese correo tiene una cuenta, te llegará un enlace para elegir una contraseña nueva.'});}
+    if(a==='cta-nuevaclave'){const c1=gv('g_clave');if(c1.length<10)return gate('nueva_clave',mt('CTA-ERR-004'));const cli=await cuentasCliente(),r=await cli.auth.updateUser({password:c1});if(r.error)throw cuentasError(r.error);return cuentasDespues();}
+    if(a==='cta-aceptar'){const cod=gv('g_invcod').trim();if(!cod)return gate('sin_firma','Escribe el código de invitación.');S.invitacion=cod;return cuentasDespues();}
+    if(a==='cta-crearfirma'){const nom=gv('g_firma').trim(),cod=gv('g_regcod').trim();if(nom.length<2)return gate('sin_firma','Escribe el nombre de la firma.');const id=await nubeRpc('crear_firma',{p_nombre:nom,p_codigo:cod});try{(await cuentasCliente()).auth.updateUser({data:{firma_nombre:null,codigo_registro:null}});}catch(e){}S.cuenta.firmas=await nubeRpc('mis_firmas');const nueva=S.cuenta.firmas.find(x=>x.firma_id===id);await cuentasEntrar(nueva);return toast(mt('CTA-INF-001',{firma:cuentaNombre(nueva)}));}
+    if(a==='cta-elegir'){const x=(S.cuenta.firmas||[]).find(y=>y.firma_id===b.dataset.f);if(x)return cuentasEntrar(x);return;}
+    if(a==='cta-salir')return cuentasSalir();
+    if(a==='cta-cambiarfirma'){try{sessionStorage.removeItem('tributek_firma');}catch(e){}S.clients=[];S.cuenta.firma=null;S.view='home';S.id=null;S.data={};S.results=null;S.snap={};S.cq={};const fs=await nubeRpc('mis_firmas');S.cuenta.firmas=fs;render();return gateMostrar(fs.length?'selector':'sin_firma');}
+    if(!f)return;
+    if(a==='cta-firma'){collectClient();return cuentasPanel();}
+    if(a==='cta-guardarfirma'){await nubeRpc('actualizar_firma',{p_firma:f.firma_id,p_nombre:gv('cta_nombre'),p_pie:gv('cta_pie')});S.cuenta.firmas=await nubeRpc('mis_firmas');const nuevo=S.cuenta.firmas.find(x=>x.firma_id===f.firma_id);if(nuevo)S.cuenta.firma=nuevo;toast('Datos de la firma guardados.');return cuentasPanel();}
+    if(a==='cta-invitar'){const correo=gv('cta_icorreo').trim(),rol=gv('cta_irol');const cod=await nubeRpc('invitar',{p_firma:f.firma_id,p_correo:correo,p_rol:rol});S.cuenta.panel=Object.assign(S.cuenta.panel||{},{ultima:{correo:correo.toLowerCase(),link:location.origin+location.pathname+'#invitacion='+cod}});return cuentasPanel();}
+    if(a==='cta-copiar'){const i=document.getElementById('cta_link');if(i){i.select();try{await navigator.clipboard.writeText(i.value);toast('Enlace copiado.');}catch(e){toast('Selecciona el enlace y cópialo con Ctrl+C.');}}return;}
+    if(a==='cta-revocar'){await nubeRpc('revocar_invitacion',{p_id:b.dataset.id});toast('Invitación revocada.');return cuentasPanel();}
+    if(a==='cta-quitar'){if(!await pedirConfirmacion({titulo:'Quitar de la firma',texto:'Vas a quitar a '+(b.dataset.c||'esta persona')+' de la firma. Perderá el acceso de inmediato.',si:'Quitar',no:'Cancelar'}))return;await nubeRpc('quitar_miembro',{p_firma:f.firma_id,p_usuario:b.dataset.u});toast('Quité a esa persona de la firma.');return cuentasPanel();}
+    if(a==='cta-salirfirma'){if(!await pedirConfirmacion({titulo:'Salir de la firma',texto:'Dejarás de ver los clientes de «'+f.nombre+'». Para volver necesitarás una invitación.',si:'Salir',no:'Cancelar'}))return;await nubeRpc('salir_de_firma',{p_firma:f.firma_id});return cuentasSalir();}
+    if(a==='cta-cerrarfirma'){if(!await pedirConfirmacion({titulo:'Cerrar la firma',texto:'Se cierra «'+f.nombre+'» y nadie podrá entrar a sus clientes. Esta acción no se deshace desde la aplicación.',si:'Cerrar la firma',no:'Cancelar'}))return;await nubeRpc('cerrar_firma',{p_firma:f.firma_id});return cuentasSalir();}
+  }catch(e){const x=e&&e.codigo?e:cuentasError(e);if(x.codigo==='sin_sesion'){gateMostrar('entrar',{aviso:cuentasTextoError(x)});return;}
+    if(S.gate&&S.gate.p!=='cargando')S.gate.aviso=cuentasTextoError(x),gateDibujar();else{if(S.gate&&S.gate.p==='cargando')gateOcultar();toast(cuentasTextoError(x));}}
+}
+const cuentaNombre=f=>(f&&f.nombre)||'';
+async function cuentasCambio(el){
+  const f=cuentaFirma();if(!f||el.dataset.cta!=='rol')return;
+  try{await nubeRpc('cambiar_rol',{p_firma:f.firma_id,p_usuario:el.dataset.u,p_rol:el.value});toast('Rol actualizado.');}catch(e){toast(cuentasTextoError(e));}
+  return cuentasPanel();
+}
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-a^="cta-"]');if(!b)return;e.stopPropagation();e.preventDefault();cuentasClick(b.dataset.a,b);},true);
+document.addEventListener('change',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.cta){e.stopPropagation();cuentasCambio(el);}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.gate&&e.target&&e.target.closest&&e.target.closest('#gate')&&e.target.tagName==='INPUT'&&e.target.type!=='checkbox'){const b=document.querySelector('#gate .btn[data-a^="cta-"]');if(b){e.preventDefault();b.click();}}},true);
+
 resetRica();resetIca();
 initStore();
+if(!cuentasCfg()||cuentasModoLocal())carpetaCargar();   // con cuentas, la carpeta de trabajo se carga después de elegir la firma (es de cada firma)
 
 </script>
 </body>
