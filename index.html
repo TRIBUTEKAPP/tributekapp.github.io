@@ -542,6 +542,9 @@ body.gate-activo>*:not(#gate):not(#toast):not(script):not(style){visibility:hidd
    El grupo va en su propio contenedor para que su altura no cambie (los márgenes de adentro se siguen fusionando igual) y nunca se encoge: si no cabe, el menú se desplaza como antes. */
 #railbody.centrado{flex:1 1 auto;display:flex;flex-direction:column}#railbody.centrado>.rail-grupo{margin:auto 0}
 
+.gate .gate-invita{background:var(--soft);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:10px 12px;margin:10px 0;font-size:13.5px;line-height:1.5;color:var(--ink)}
+.gate .f-in input[readonly]{background:var(--soft);color:var(--muted);cursor:not-allowed}
+
 </style>
 </head>
 <body>
@@ -923,9 +926,9 @@ const MENSAJES = {
   },
   'CTA-ERR-002': {
     tipo: 'dato_faltante',
-    texto: 'Falta confirmar tu correo.',
-    importa: 'Si no lo confirmas, no puedes entrar.',
-    ayuda: 'Revisa tu bandeja de entrada (y el spam) y pulsa el enlace del mensaje de confirmación.',
+    texto: 'Tu cuenta todavía no está activa.',
+    importa: 'Si no está activa, no puedes entrar.',
+    ayuda: 'Espera a que tu cuenta se active y vuelve a entrar; si tarda, avisa a tu administradora.',
     vars: [],
     ejemplo: {}
   },
@@ -957,7 +960,7 @@ const MENSAJES = {
     tipo: 'dato_faltante',
     texto: 'Ese código de invitación no sirve.',
     importa: 'Si el código está vencido, ya se usó o es de otro correo, no se puede entrar a la firma.',
-    ayuda: 'Verifica que entraste con el mismo correo al que llegó la invitación o pide otra a tu administradora.',
+    ayuda: 'Verifica que usaste el mismo correo con el que te invitaron o pide otro enlace a tu administradora.',
     vars: [],
     ejemplo: {}
   },
@@ -14445,7 +14448,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega39';
+const APP_ENTREGA='fase4b-entrega40';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -14743,13 +14746,14 @@ const gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
 function gateMostrar(p,extra){S.gate=Object.assign({p,aviso:''},extra||{});gateDibujar();}
 function gateOcultar(){S.gate=null;const g=document.getElementById('gate');if(g)g.remove();document.body.classList.remove('gate-activo');}
 function gateCuerpo(){
-  const g=S.gate,av=g.aviso?`<p class="aviso" role="alert"><b>${esc(g.aviso)}</b></p>`:'',inv=S.invitacion&&(g.p==='entrar'||g.p==='crear')?'<p class="hint">Tienes una invitación pendiente: entra o crea tu cuenta con el correo al que llegó.</p>':'';
+  const g=S.gate,av=g.aviso?`<p class="aviso" role="alert"><b>${esc(g.aviso)}</b></p>`:'',iv=S.invitacion?S.invitacionInfo:null,lock=!!(iv&&iv.estado==='valida'&&g.p==='crear'),corr=lock?iv.correo:(g.correo||(iv&&iv.estado==='valida'?iv.correo:''));
+  const inv=S.invitacion&&(g.p==='entrar'||g.p==='crear')?(iv&&iv.estado==='valida'?`<p class="gate-invita">Te invitaron a unirte a <b>«${esc(iv.firma)}»</b> como <b>${esc(ROL_TXT[iv.rol]||iv.rol)}</b>. ${g.p==='crear'?'Crea tu cuenta con este correo y entrarás directo a la firma.':'Si ya tienes cuenta, entra con ese mismo correo.'}</p>`:'<p class="hint">Tienes una invitación pendiente: crea tu cuenta con el correo con el que te invitaron, o entra si ya tienes una.</p>'):'';
   const icoDe=id=>/correo/.test(id)?'mail':/clave/.test(id)?'lock':/empresa|firma/.test(id)?'building':'key',phDe={g_correo:'nombre@tuempresa.co',g_clave:'Tu contraseña',g_clave2:'Repite tu contraseña',g_empresa:'Nombre de tu empresa',g_firma:'Nombre de tu empresa',g_regcod:'TRB-XXXXXXXXXXXX',g_invcod:'Pega aquí tu código'};
   const campo=(id,et,tipo,extra)=>`<div class="f"><label for="${id}">${et}</label><div class="f-in"><span class="f-ico">${GATE_ICO[icoDe(id)]}</span><input id="${id}" type="${tipo}" ${phDe[id]?'placeholder="'+phDe[id]+'" ':''}${extra||''}>${tipo==='password'?`<button type="button" class="ojo" data-a="cta-ver" data-t="${id}" aria-label="Mostrar contraseña" aria-pressed="false">${GATE_ICO.eye}</button>`:''}</div></div>`,pol=(window.TRIBUTEK_CONFIG||{}).politicaUrl;
   if(g.p==='cargando')return '<h3>Tributek</h3><p role="status">Cargando…</p>';
-  if(g.p==='entrar')return `<h3>Ingreso a <span class="gate-marca-txt">TRIBUTEK</span></h3><p class="gate-saludo">Bienvenido, auditor. Ingresa con tu usuario para continuar.</p>${av}${inv}${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña','password','autocomplete="current-password"')}<label class="chk"><input id="g_rec" type="checkbox"> Mantener la sesión en este equipo</label><div class="row"><button class="btn" data-a="cta-entrar">Entrar</button></div><p class="gate-o"><span>¿Primera vez?</span></p><div class="row"><button class="btn ghost" data-a="cta-ir-empresa">Crear empresa</button></div><p class="hint gate-enlaces"><button class="link" data-a="cta-ir-crear">Me invitaron a una empresa</button> · <button class="link" data-a="cta-ir-olvide">Olvidé mi contraseña</button></p><p class="hint">¿Solo quieres usar Tributek en este navegador, sin cuenta? <button class="link" data-a="cta-local">Usar sin cuenta</button></p>`;
+  if(g.p==='entrar')return `<h3>Ingreso a <span class="gate-marca-txt">TRIBUTEK</span></h3><p class="gate-saludo">Bienvenido, auditor. Ingresa con tu usuario para continuar.</p>${av}${inv}${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(corr)+'"')}${campo('g_clave','Contraseña','password','autocomplete="current-password"')}<label class="chk"><input id="g_rec" type="checkbox"> Mantener la sesión en este equipo</label><div class="row"><button class="btn" data-a="cta-entrar">Entrar</button></div><p class="gate-o"><span>¿Primera vez?</span></p><div class="row"><button class="btn ghost" data-a="cta-ir-empresa">Crear empresa</button></div><p class="hint gate-enlaces"><button class="link" data-a="cta-ir-crear">Me invitaron a una empresa</button> · <button class="link" data-a="cta-ir-olvide">Olvidé mi contraseña</button></p><p class="hint">¿Solo quieres usar Tributek en este navegador, sin cuenta? <button class="link" data-a="cta-local">Usar sin cuenta</button></p>`;
   if(g.p==='empresa')return `<h3>Crear empresa</h3>${av}<p class="gate-saludo">Creas tu empresa y tu cuenta de administradora en un solo paso.</p>${campo('g_empresa','Nombre de la empresa','text','maxlength="80" autocomplete="organization" value="'+esc(g.empresa||'')+'"')}${campo('g_correo','Tu correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña (mínimo 10 caracteres)','password','autocomplete="new-password"')}${campo('g_clave2','Repite la contraseña','password','autocomplete="new-password"')}${g.registroAbierto?'':campo('g_regcod','Código de registro (te lo entrega Tributek)','text','autocomplete="off" value="'+esc(g.codigo||'')+'"')}<label class="chk"><input id="g_acepto" type="checkbox"> Acepto el tratamiento de mis datos personales${pol?` (<a href="${esc(pol)}" target="_blank" rel="noopener">política</a>)`:''}</label><div class="row"><button class="btn" data-a="cta-crearempresa">Crear empresa</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Ya tengo cuenta: entrar</button></p>`;
-  if(g.p==='crear')return `<h3>Crear cuenta</h3>${av}${inv}<p class="hint">Esta cuenta es para unirte a una empresa que ya existe, con una invitación. Para crear una empresa nueva, usa <button class="link" data-a="cta-ir-empresa">Crear empresa</button>. Tu cuenta guarda tu correo y los perfiles de los clientes de la firma; los archivos del mes no salen de tu navegador.</p>${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}${campo('g_clave','Contraseña (mínimo 10 caracteres)','password','autocomplete="new-password"')}${campo('g_clave2','Repite la contraseña','password','autocomplete="new-password"')}<label class="chk"><input id="g_acepto" type="checkbox"> Acepto el tratamiento de mis datos personales${pol?` (<a href="${esc(pol)}" target="_blank" rel="noopener">política</a>)`:''}</label><div class="row"><button class="btn" data-a="cta-crear">Crear cuenta</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Ya tengo cuenta: entrar</button></p>`;
+  if(g.p==='crear')return `<h3>Crear cuenta</h3>${av}${inv}<p class="hint">Esta cuenta es para unirte a una empresa que ya existe, con una invitación. Para crear una empresa nueva, usa <button class="link" data-a="cta-ir-empresa">Crear empresa</button>. Tu cuenta guarda tu correo y los perfiles de los clientes de la firma; los archivos del mes no salen de tu navegador.</p>${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(corr)+'"'+(lock?' readonly':''))}${campo('g_clave','Contraseña (mínimo 10 caracteres)','password','autocomplete="new-password"')}${campo('g_clave2','Repite la contraseña','password','autocomplete="new-password"')}<label class="chk"><input id="g_acepto" type="checkbox"> Acepto el tratamiento de mis datos personales${pol?` (<a href="${esc(pol)}" target="_blank" rel="noopener">política</a>)`:''}</label><div class="row"><button class="btn" data-a="cta-crear">Crear cuenta</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Ya tengo cuenta: entrar</button></p>`;
   if(g.p==='olvide')return `<h3>Recuperar contraseña</h3>${av}${campo('g_correo','Correo','email','autocomplete="username" value="'+esc(g.correo||'')+'"')}<div class="row"><button class="btn" data-a="cta-olvide">Enviar enlace</button></div><p class="hint"><button class="link" data-a="cta-ir-entrar">Volver a entrar</button></p>`;
   if(g.p==='nueva_clave')return `<h3>Nueva contraseña</h3>${av}${campo('g_clave','Contraseña nueva (mínimo 10 caracteres)','password','autocomplete="new-password"')}<div class="row"><button class="btn" data-a="cta-nuevaclave">Guardar contraseña</button></div>`;
   if(g.p==='selector')return `<h3>¿En qué firma vas a trabajar?</h3>${av}<div class="gate-firmas">${(S.cuenta.firmas||[]).map(f=>`<button class="btn ghost" data-a="cta-elegir" data-f="${esc(f.firma_id)}">${esc(f.nombre)} · ${esc(ROL_TXT[f.rol]||f.rol)}</button>`).join('')}</div><p class="hint"><button class="link" data-a="cta-salir">Cerrar sesión</button></p>`;
@@ -14772,20 +14776,34 @@ function gateDibujar(){
   document.body.classList.add('gate-activo');   // mientras se pide el ingreso no se ve nada de la aplicación
   g.innerHTML=`${gateMarca()}<div class="gate-panel"><div class="gatecard">${gateCuerpo()}</div><p class="gate-pie">© ${new Date().getFullYear()} Tributek · Revisión de impuestos</p></div>`;const f=g.querySelector('input:not([type=checkbox])');if(f&&!f.value)f.focus();
 }
+const INV_LS='tributek_inv';   // el código del enlace de invitación (no son datos de clientes): se recuerda hasta que se use, para quien crea la cuenta hoy y entra otro día
+function invGuardar(c){try{localStorage.setItem(INV_LS,JSON.stringify({c,t:Date.now()}));}catch(e){}}
+function invLeer(){try{const o=JSON.parse(localStorage.getItem(INV_LS)||'null');if(o&&o.c&&Date.now()-o.t<7*864e5)return o.c;localStorage.removeItem(INV_LS);}catch(e){}return null;}
+function invBorrar(){try{localStorage.removeItem(INV_LS);}catch(e){}S.invitacion=null;S.invitacionInfo=null;}
+async function invInfo(){   // con el código del enlace y sin iniciar sesión: a qué firma, con qué rol y con qué correo es la invitación
+  S.invitacionInfo=null;if(!S.invitacion)return;
+  try{const f=await nubeRpc('ver_invitacion',{p_codigo:S.invitacion});S.invitacionInfo=f&&f[0]?{estado:'valida',firma:f[0].firma,rol:f[0].rol,correo:f[0].correo}:{estado:'invalida'};}
+  catch(e){S.invitacionInfo={estado:'desconocida'};}   // por ejemplo, si el esquema de la base aún no trae la función: se sigue con un aviso general
+}
 async function cuentasInit(){
   S.clients=[];S.cuenta={usuario:null,firmas:[],firma:null};   // modo cuenta desde el primer momento: no se lee ningún cliente del navegador
-  try{const m=/#invitacion=([A-Za-z0-9]+)/.exec(location.hash||'');if(m){S.invitacion=m[1];history.replaceState(null,'',location.pathname+location.search);}}catch(e){}
+  try{const m=/#invitacion=([A-Za-z0-9]+)/.exec(location.hash||'');if(m){S.invitacion=m[1];invGuardar(m[1]);history.replaceState(null,'',location.pathname+location.search);}else S.invitacion=invLeer();}catch(e){}
   render();gateMostrar('cargando');
   try{const cli=await cuentasCliente();cli.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')gateMostrar('nueva_clave');});
-    const r=await cli.auth.getSession();if(r&&r.data&&r.data.session)return cuentasDespues();gateMostrar('entrar');}
+    const r=await cli.auth.getSession();if(r&&r.data&&r.data.session)return cuentasDespues();
+    await invInfo();const inf=S.invitacionInfo;
+    if(inf&&inf.estado==='valida')return gateMostrar('crear',{correo:inf.correo});   // quien llega por el enlace aún no tiene cuenta: se abre «Crear cuenta», con el correo de la invitación
+    if(inf&&inf.estado==='desconocida')return gateMostrar('crear');
+    if(inf&&inf.estado==='invalida'){invBorrar();return gateMostrar('entrar',{aviso:mt('CTA-ERR-006')});}
+    gateMostrar('entrar');}
   catch(e){gateMostrar('entrar',{aviso:cuentasTextoError(cuentasError(e))});}
 }
 async function cuentasDespues(){
   const cli=await cuentasCliente(),r=await cli.auth.getSession(),ses=r&&r.data&&r.data.session;if(!ses){gateMostrar('entrar');return;}
   S.cuenta={usuario:{id:ses.user.id,correo:ses.user.email},firmas:[],firma:null};gateMostrar('cargando');
   try{
-    let aviso='';if(S.invitacion){const cod=S.invitacion;S.invitacion=null;try{const id=await nubeRpc('aceptar_invitacion',{p_codigo:cod});try{sessionStorage.setItem('tributek_firma',id);}catch(e){}}catch(e){aviso=cuentasTextoError(e);}}
-    const fs=await nubeRpc('mis_firmas');S.cuenta.firmas=fs;
+    let aviso='',idInv=null;if(S.invitacion){const cod=S.invitacion;invBorrar();try{idInv=await nubeRpc('aceptar_invitacion',{p_codigo:cod});try{sessionStorage.setItem('tributek_firma',idInv);}catch(e){}}catch(e){aviso=cuentasTextoError(e);}}
+    const fs=await nubeRpc('mis_firmas');S.cuenta.firmas=fs;if(idInv){const fi=fs.find(x=>x.firma_id===idInv);if(fi)S._bienvenida='Entraste a «'+fi.nombre+'» como '+(ROL_TXT[fi.rol]||fi.rol)+'.';}
     if(!fs.length){const meta=(ses.user&&ses.user.user_metadata)||{};if(meta.firma_nombre){   // viene de «Crear empresa»: se crea ahora, ya con el correo confirmado
       try{const id=await nubeRpc('crear_firma',{p_nombre:meta.firma_nombre,p_codigo:meta.codigo_registro||''});try{await cli.auth.updateUser({data:{firma_nombre:null,codigo_registro:null}});}catch(e){}
         S.cuenta.firmas=await nubeRpc('mis_firmas');const nueva=S.cuenta.firmas.find(x=>x.firma_id===id);if(nueva){await cuentasEntrar(nueva);return toast(mt('CTA-INF-001',{firma:cuentaNombre(nueva)}));}}
@@ -14797,7 +14815,7 @@ async function cuentasDespues(){
 async function cuentasEntrar(f){
   gateMostrar('cargando');
   try{const filas=await nubeRpc('listar_clientes',{p_firma:f.firma_id});S.cver={};S.snap={};S.clients=filas.map(x=>{const c=x.datos&&typeof x.datos==='object'?x.datos:{};c.id=c.id||x.cliente_id;S.cver[x.cliente_id]=x.version;return c;});S.clients.forEach(migrate);
-    S.cuenta.firma=f;S.cuenta.panel=null;try{sessionStorage.setItem('tributek_firma',f.firma_id);}catch(e){}S.id=null;S.view='home';S.carpeta=null;gateOcultar();render();carpetaCargar();}
+    S.cuenta.firma=f;S.cuenta.panel=null;try{sessionStorage.setItem('tributek_firma',f.firma_id);}catch(e){}S.id=null;S.view='home';S.carpeta=null;gateOcultar();render();carpetaCargar();if(S._bienvenida){toast(S._bienvenida);S._bienvenida=null;}}
   catch(e){gateMostrar('entrar',{aviso:cuentasTextoError(e)});}
 }
 async function cuentasSalir(){
@@ -14837,7 +14855,7 @@ function viewFirma(){
   return `<div class="panel"><h3>Mi firma · ${esc(f.nombre)}</h3><p class="hint">Tu rol: <b>${esc(ROL_TXT[f.rol]||f.rol)}</b>${f.es_dueno?' · eres la dueña de la firma':''}. Cada persona de la firma ve solo los clientes de esta firma; los archivos del mes no se guardan en la nube.</p>
   ${adm?`<div class="grid"><div class="f"><label for="cta_nombre">Nombre de la firma</label><input id="cta_nombre" maxlength="80" value="${esc(f.nombre)}"></div><div class="f"><label for="cta_pie">Pie del Excel <span class="hint">(opcional; reemplaza «Generado con Revisión de impuestos…»)</span></label><input id="cta_pie" maxlength="200" value="${esc(f.pie_excel||'')}"></div></div><div class="row"><button class="btn" data-a="cta-guardarfirma">Guardar datos de la firma</button></div>`:''}</div>
   <div class="panel"><h3>Miembros</h3><div class="scroll"><table><thead><tr><th>Correo</th><th>Rol</th><th></th></tr></thead><tbody>${P.miembros.map(fila).join('')}</tbody></table></div></div>
-  ${adm?`<div class="panel"><h3>Invitar a una persona</h3><p class="hint">Se crea un enlace de un solo uso, que vence en 7 días y solo sirve para el correo que escribas. Envíaselo por un medio seguro.</p><div class="grid"><div class="f"><label for="cta_icorreo">Correo de la persona</label><input id="cta_icorreo" type="email" autocomplete="off"></div><div class="f"><label for="cta_irol">Rol</label><select id="cta_irol">${opciones('revisora')}</select></div></div><div class="row"><button class="btn" data-a="cta-invitar">Crear invitación</button></div>
+  ${adm?`<div class="panel"><h3>Invitar a una persona</h3><p class="hint">Se crea un enlace de un solo uso que vence en 7 días. Envíaselo a la persona (por WhatsApp u otro medio seguro): al abrirlo, crea su cuenta con el correo que escribas aquí y entra directo a la firma.</p><div class="grid"><div class="f"><label for="cta_icorreo">Correo de la persona</label><input id="cta_icorreo" type="email" autocomplete="off"></div><div class="f"><label for="cta_irol">Rol</label><select id="cta_irol">${opciones('revisora')}</select></div></div><div class="row"><button class="btn" data-a="cta-invitar">Crear invitación</button></div>
   ${P.ultima?`<div class="aviso"><p><b>Invitación para ${esc(P.ultima.correo)}</b>: el enlace solo se muestra ahora. Guárdalo y envíaselo.</p><div class="row"><input id="cta_link" readonly value="${esc(P.ultima.link)}" aria-label="Enlace de invitación" style="flex:1;min-width:260px"><button class="btn ghost" data-a="cta-copiar">Copiar enlace</button></div></div>`:''}
   ${P.invitaciones.length?`<div class="scroll"><table><thead><tr><th>Invitado</th><th>Rol</th><th>Vence</th><th></th></tr></thead><tbody>${P.invitaciones.map(inv).join('')}</tbody></table></div>`:'<p class="hint">No hay invitaciones pendientes.</p>'}</div>`:''}
   <div class="panel"><h3>Respaldo de clientes</h3><p class="hint">Descarga una copia de los perfiles de clientes de esta firma, o carga una copia para agregar clientes.</p><div class="row"><button class="btn ghost" data-a="export">Exportar respaldo</button><span class="btn ghost file" title="Cargar un respaldo de clientes">Importar<input type="file" accept=".json,application/json" data-c="import" aria-label="Importar clientes"></span></div></div>
@@ -14857,7 +14875,7 @@ async function cuentasClick(a,b){
       if(!ab&&!cod)return gate('empresa','Escribe el código de registro que te entregó Tributek.');if(!ok)return gate('empresa','Para crear la empresa debes aceptar el tratamiento de tus datos personales.');
       const cli=await cuentasCliente(),r=await cli.auth.signUp({email:correo,password:c1,options:{emailRedirectTo:location.origin+location.pathname,data:{firma_nombre:nom,codigo_registro:ab?'':cod}}});   // el nombre y el código viajan con la cuenta: la empresa se crea sola en el primer ingreso
       if(r.error)throw cuentasError(r.error);if(r.data&&r.data.session)return cuentasDespues();
-      return ir('entrar',{correo,aviso:'Te envié un correo para confirmar tu cuenta. Cuando lo confirmes y entres aquí, tu empresa «'+nom+'» se crea sola.'});}
+      return ir('entrar',{correo,aviso:'Tu cuenta quedó creada, pero todavía no está activa. Cuando lo esté, entra aquí con tu correo y tu contraseña y tu empresa «'+nom+'» se crea sola.'});}
     if(a==='cta-ir-crear')return ir('crear',{correo:gv('g_correo')});if(a==='cta-ir-entrar')return ir('entrar',{correo:gv('g_correo')});if(a==='cta-ir-olvide')return ir('olvide',{correo:gv('g_correo')});
     if(a==='cta-local'){try{sessionStorage.setItem('tributek_local','1');}catch(e){}S.cuenta=null;gateOcultar();S.clients=lsGet();S.clients.forEach(migrate);render();return;}
     if(a==='cta-entrar'){const correo=gv('g_correo').trim(),clave=gv('g_clave'),rec=!!(document.getElementById('g_rec')&&document.getElementById('g_rec').checked);if(!correo||!clave)return gate('entrar','Escribe tu correo y tu contraseña.');
@@ -14865,7 +14883,7 @@ async function cuentasClick(a,b){
     if(a==='cta-crear'){const correo=gv('g_correo').trim(),c1=gv('g_clave'),c2=gv('g_clave2'),ok=document.getElementById('g_acepto')&&document.getElementById('g_acepto').checked;
       if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo))return gate('crear','Escribe un correo válido.');if(c1.length<10)return gate('crear',mt('CTA-ERR-004'));if(c1!==c2)return gate('crear','Las dos contraseñas no coinciden.');if(!ok)return gate('crear','Para crear la cuenta debes aceptar el tratamiento de tus datos personales.');
       const cli=await cuentasCliente(),r=await cli.auth.signUp({email:correo,password:c1,options:{emailRedirectTo:location.origin+location.pathname}});if(r.error)throw cuentasError(r.error);
-      if(r.data&&r.data.session)return cuentasDespues();return ir('entrar',{correo,aviso:'Te envié un correo para confirmar tu cuenta. Cuando lo confirmes, entra aquí con tu contraseña.'});}
+      if(r.data&&r.data.session)return cuentasDespues();return ir('entrar',{correo,aviso:'Tu cuenta quedó creada, pero todavía no está activa. Cuando lo esté, entra aquí con tu correo y tu contraseña'+(S.invitacion?' y entrarás directo a la firma que te invitó':'')+'. Si tarda, avisa a tu administradora.'});}
     if(a==='cta-olvide'){const correo=gv('g_correo').trim();if(!correo)return gate('olvide','Escribe tu correo.');const cli=await cuentasCliente();await cli.auth.resetPasswordForEmail(correo,{redirectTo:location.origin+location.pathname});return ir('entrar',{correo,aviso:'Si ese correo tiene una cuenta, te llegará un enlace para elegir una contraseña nueva.'});}
     if(a==='cta-nuevaclave'){const c1=gv('g_clave');if(c1.length<10)return gate('nueva_clave',mt('CTA-ERR-004'));const cli=await cuentasCliente(),r=await cli.auth.updateUser({password:c1});if(r.error)throw cuentasError(r.error);return cuentasDespues();}
     if(a==='cta-aceptar'){const cod=gv('g_invcod').trim();if(!cod)return gate('sin_firma','Escribe el código de invitación.');S.invitacion=cod;return cuentasDespues();}
