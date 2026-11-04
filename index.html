@@ -2667,6 +2667,90 @@ function ruleBaseDian(ctx){
   if(nSinDoc)return conTodos(R('basedian',t,'warn',base+'. '+nSinDoc+' documento(s) de terceros con retenciones no se pudieron enlazar a un documento contable.'+cola,cols,shown),todos);
   return conTodos(R('basedian',t,'ok',base+'; ninguna diferencia de base.'+cola),todos);
 }
+/* Cruce de CADA LÍNEA del reporte de retenciones con la DIAN. Se busca el tercero y la base primero en los documentos RECIBIDOS (facturas y documentos equivalentes) y, si no aparece o la base no coincide,
+   en los DOCUMENTOS SOPORTE que emitió el cliente (compras a no obligados a facturar; algunas retenciones, también a personas jurídicas, se soportan con documento soporte). La observación de cada línea
+   va a la columna «Observaciones» de la hoja «Verificación» del reporte de retenciones. Los salarios y las autorretenciones no tienen factura ni documento soporte del tercero: no se cruzan. */
+const CRUCE_NO_APLICA=['RENTAS DE TRABAJO','AUTORRETENCIONES'];
+function cruceLineasDian(ctx){
+  const nit=nitBase(ctx.client.nit||''),tol=ctx.tol||1000;
+  const rec=ctx.rec?ctx.rec.rows.filter(r=>/factura|equivalente/i.test(r.tipo)&&!/nota/i.test(r.tipo)&&!(nit&&r.nitE===nit)):[];
+  const ds=ctx.ds?ctx.ds.rows.filter(r=>/documento soporte/i.test(r.tipo)&&!/nota de ajuste/i.test(r.tipo)&&(!nit||!r.nitE||r.nitE===nit)):[];
+  if(!rec.length&&!ds.length)return{motivo:'dian'};
+  const L=lineSource(ctx);if(!L)return{motivo:'lineas'};
+  const lineas=L.filter(l=>l.a>0&&l.ter&&!CRUCE_NO_APLICA.includes(conceptoCuenta(ctx.rules,l.cta,l.nom)));
+  if(!lineas.length)return{motivo:'sinlineas'};
+  const cand=(origen,r,ter)=>({origen,r,ter,id:(r.pref||'')+(r.folio||''),base:dianBase(r),usado:false});
+  const recT={},dsT={};
+  for(const r of rec)(recT[r.nitE]=recT[r.nitE]||[]).push(cand('Recibidos',r,r.nitE));
+  for(const r of ds)(dsT[r.nitR]=dsT[r.nitR]||[]).push(cand('Documentos soporte',r,r.nitR));
+  const dd=a=>a.map(z=>z.id+' ($'+fm(z.base)+')').join(', ');
+  // documentos sin usar del tercero cuya suma da la base: uno solo, una combinación de hasta 4, o todos (la base del reporte agrupa todos los del tercero)
+  const buscar=(pool,b)=>{const p=pool.filter(z=>!z.usado&&z.base>0).sort((u,v)=>Math.abs(u.base-b)-Math.abs(v.base-b));
+    const uno=p.find(z=>Math.abs(z.base-b)<=tol);if(uno)return[uno];
+    const sub=subconjuntoBase(p,b,tol,4);if(sub)return sub;
+    if(p.length>1&&Math.abs(p.reduce((s,z)=>s+z.base,0)-b)<=tol)return p;
+    return null;};
+  const items=[],porLinea={},porTer={};
+  for(const l of lineas)(porTer[l.ter]=porTer[l.ter]||[]).push(l);
+  for(const ter of Object.keys(porTer)){
+    const RP=recT[ter]||[],DP=dsT[ter]||[],mios=[];
+    for(const l of porTer[ter].sort((u,v)=>(v.base||0)-(u.base||0))){
+      const b=l.base!=null&&l.base>0?l.base:null;let est,obs,docs=[],dif=null;
+      if(b==null){   // el reporte no trae la base: solo se puede confirmar que el tercero aparece
+        if(RP.length||DP.length){est='tercero';docs=RP.length?RP:DP;
+          obs='Aparece en la DIAN ('+[RP.length?'Recibidos: '+dd(RP.slice(0,3)):'',DP.length?'documentos soporte: '+dd(DP.slice(0,3)):''].filter(Boolean).join('; ')+'); el reporte de retenciones no trae la base para compararla.';}
+        else{est='sin';obs='No aparece en la DIAN (ni en Recibidos ni en documentos soporte) en el período: revisa el soporte de la retención.';}
+      }else{
+        let m=buscar(RP,b);
+        if(m){est='rec';docs=m;obs='Cruza con la DIAN (Recibidos): '+dd(m)+(m.length>1?'; suma $'+fm(m.reduce((s,z)=>s+z.base,0)):'')+'.';}
+        else if((m=buscar(DP,b))){est='ds';docs=m;
+          obs='Cruza con la DIAN en documentos soporte: '+dd(m)+(m.length>1?'; suma $'+fm(m.reduce((s,z)=>s+z.base,0)):'')+'. '+(RP.length?'En Recibidos hay documentos de este tercero, pero con otra base.':'No aparece en Recibidos.');}
+        else if(RP.length&&DP.length&&(m=buscar(RP.concat(DP),b))){est='mixto';docs=m;obs='Cruza con la DIAN en recibidos y documentos soporte: '+dd(m)+'.';}
+        else if(RP.length||DP.length){est='dif';docs=[];}   // se resuelve abajo: puede ser un documento repartido entre varias líneas del reporte, o una diferencia de base
+        else{est='sin';obs='No aparece en la DIAN (ni en Recibidos ni en documentos soporte) en el período: revisa el soporte de la retención.';}
+        if(est==='rec'||est==='ds'||est==='mixto')docs.forEach(z=>{z.usado=true;});
+      }
+      mios.push({est,obs,cta:l.cta,nom:l.nom,ter:l.ter,terN:l.terN||l.ter,doc:l.doc||'',base:b,ret:l.a,docs:docs.map(z=>({id:z.id,origen:z.origen,base:z.base})),dif,_docs:docs});
+    }
+    // una misma factura puede haberse retenido en varias cuentas (p. ej. transporte y arrendamiento): varias líneas del reporte cuya base suma la de uno o más documentos sin usar
+    const pend=mios.filter(it=>it.est==='dif');
+    if(pend.length>=2&&RP.concat(DP).some(z=>!z.usado)){
+      const subs=[],n=pend.length;for(let mask=1;mask<(1<<n);mask++){const s=pend.filter((_,i)=>mask&(1<<i));if(s.length>=2&&s.length<=4)subs.push(s);}
+      subs.sort((u,v)=>v.length-u.length);const hechas=new Set();
+      for(const s of subs){if(s.some(it=>hechas.has(it)))continue;const suma=s.reduce((a,it)=>a+it.base,0);
+        let m=buscar(RP,suma),o='rec';if(!m){m=buscar(DP,suma);o='ds';}if(!m&&RP.length&&DP.length){m=buscar(RP.concat(DP),suma);o='mixto';}
+        if(m){m.forEach(z=>{z.usado=true;});
+          for(const it of s){hechas.add(it);it.est=o;it.dif=null;it._docs=m;it.docs=m.map(z=>({id:z.id,origen:z.origen,base:z.base}));
+            it.obs='Cruza con la DIAN '+(o==='rec'?'(Recibidos)':o==='ds'?'en documentos soporte':'en recibidos y documentos soporte')+': '+dd(m)+'; la base del documento se reparte entre '+s.length+' líneas del reporte (cuentas '+s.map(z=>z.cta).join(' y ')+').';}}}
+    }
+    for(const it of mios.filter(z=>z.est==='dif')){   // lo que queda: el tercero sí está en la DIAN, pero la base no coincide
+      const todos=RP.concat(DP),libres=todos.filter(z=>!z.usado),base=libres.length?libres:todos,cerca=base.slice().sort((u,v)=>Math.abs(u.base-it.base)-Math.abs(v.base-it.base))[0];
+      it.dif=cerca.base-it.base;it._docs=[cerca];it.docs=[{id:cerca.id,origen:cerca.origen,base:cerca.base}];
+      if(cerca.usado&&Math.abs(it.dif)<=tol){it.obs='La DIAN trae un solo documento ('+cerca.id+' por $'+fm(cerca.base)+') y ya cruzó con otra línea del reporte del mismo tercero y la misma base: revisa si esta retención está duplicada.';continue;}
+      it.obs='Cruza con la DIAN por tercero ('+(cerca.origen==='Recibidos'?'factura recibida':'documento soporte')+' '+cerca.id+' por $'+fm(cerca.base)+'), pero la base del reporte ($'+fm(it.base)+') no coincide: '+
+        (it.dif>0?'la DIAN es mayor en $'+fm(it.dif)+'. Revisa si el documento trae conceptos no sujetos o un descuento.':'el reporte supera a la DIAN en $'+fm(-it.dif)+'. Revisa que no se haya retenido de más.');}
+    for(const it of mios){delete it._docs;items.push(it);const k=it.doc+'|'+it.cta+'|'+it.ter;
+      porLinea[k]=porLinea[k]?{est:['sin','dif'].includes(porLinea[k].est)?porLinea[k].est:it.est,obs:porLinea[k].obs+' · '+it.obs}:{est:it.est,obs:it.obs};}
+  }
+  return{items,porLinea};
+}
+function ruleCruceRet(ctx){
+  const t='Retenciones del reporte contra la DIAN (recibidos y documentos soporte)';
+  if(soloAgregado(ctx))return NA('cruceret',t,MSG_AGREGADO);
+  const c=cruceLineasDian(ctx);
+  if(c.motivo==='dian')return NA('cruceret',t,'Falta el reporte de la DIAN con los documentos recibidos y/o los documentos soporte.');
+  if(c.motivo==='lineas')return NA('cruceret',t,'Falta el reporte de retenciones de contabilidad (auxiliar con base) o el movimiento contable.');
+  if(c.motivo==='sinlineas')return NA('cruceret',t,'El reporte no trae retenciones a terceros para cruzar con la DIAN (los salarios y las autorretenciones no se cruzan).');
+  const cnt={rec:0,ds:0,mixto:0,tercero:0,dif:0,sin:0};for(const it of c.items)cnt[it.est]++;
+  const ROT={dif:'Base distinta',sin:'No aparece en la DIAN'},cols=['Estado','Cuenta','Tercero','NIT','Base reporte','Retención','Documento DIAN','Origen','Base DIAN','Diferencia','Observación'];
+  const rows=c.items.filter(it=>it.est==='dif'||it.est==='sin').sort((u,v)=>(u.est==='sin'?0:1)-(v.est==='sin'?0:1)||v.ret-u.ret).slice(0,400).map(it=>({Estado:ROT[it.est],Cuenta:it.cta+' '+it.nom,Tercero:it.terN,NIT:it.ter,'Base reporte':it.base==null?'':Math.round(it.base),Retención:Math.round(it.ret),
+    'Documento DIAN':it.docs.map(z=>z.id).join(', '),Origen:it.docs.length?it.docs[0].origen:'','Base DIAN':it.docs.length?Math.round(it.docs.reduce((s,z)=>s+z.base,0)):'',Diferencia:it.dif==null?'':Math.round(it.dif),Observación:it.obs}));
+  const n=c.items.length;
+  const resumen='Líneas del reporte de retenciones a terceros contra la DIAN ('+n+'): cruzan con Recibidos, '+cnt.rec+(cnt.ds?'; cruzan con documentos soporte (no estaban en Recibidos), '+cnt.ds:'')+(cnt.mixto?'; cruzan combinando recibidos y documentos soporte, '+cnt.mixto:'')+
+    (cnt.tercero?'; aparecen en la DIAN pero el reporte no trae la base para compararlas, '+cnt.tercero:'')+(cnt.dif?'; cruzan por tercero pero con una base distinta, '+cnt.dif:'')+(cnt.sin?'; no aparecen en la DIAN (ni en recibidos ni en documentos soporte), '+cnt.sin:'')+'.';
+  const est=(cnt.dif||cnt.sin)?'warn':'ok';
+  const x=R('cruceret',t,est,resumen,cols,rows);x.todos=c.items;x.porLinea=c.porLinea;x.cuenta=cnt;return x;
+}
 /* Combinación de partidas que más se acerca a un valor (meet-in-the-middle, hasta 26 partidas). Con varias exactas prefiere la de menos cuentas. */
 function mejorSubconjunto(items,objetivo,tol){
   let P=items.map((x,i)=>({v:x.v,i})).filter(x=>Math.abs(x.v)>0.5),trunc=false;
@@ -3512,6 +3596,7 @@ const VALIDACIONES_RTE=[
   ['retdian','Retención en las facturas recibidas de la DIAN (según las bases)',ruleRetDian],
   ['ds','Documentos soporte y consecutivos',ruleDS],
   ['basedian','Base de la DIAN (total sin IVA y demás impuestos) vs. base del reporte de retenciones',ruleBaseDian],
+  ['cruceret','Retenciones del reporte contra la DIAN (recibidos y documentos soporte)',ruleCruceRet],
   ['autorret','Autorretención: ingresos del formulario vs. facturas emitidas en la DIAN vs. cuentas 41 y 42',ruleAutorret],
   ['omitida','Gastos sin retención en la fuente',ruleOmitida],
   ['fijos','Gastos fijos del cliente',ruleFijos],
@@ -12183,6 +12268,7 @@ const CHECK=[
  {id:'c2b',t:'El pago de la declaración del mes anterior se hizo dentro del plazo del calendario tributario.',auto:'oportunidad',extra:true},
  {id:'c3b',t:'La retención de IVA (casillas 131 a 134) cruza con las cuentas 2367.',auto:'iva',extra:true},
  {id:'c8b',t:'La base de cada factura y documento soporte de la DIAN (total sin IVA y demás impuestos) coincide con la base del reporte de retenciones de contabilidad.',auto:'basedian',extra:true},
+ {id:'c8d',t:'Cada retención del reporte de retenciones aparece en la DIAN: en las facturas recibidas o, si no está ahí, en los documentos soporte (la observación queda en la hoja Verificación).',auto:'cruceret',extra:true},
  {id:'c8c',t:'Si el formulario trae autorretenciones (casillas 59 a 76 y 113 a 128): los ingresos de esas casillas coinciden con las facturas emitidas en la DIAN sin IVA y con el saldo de la cuenta 41; las diferencias se explican con la cuenta 42.',auto:'autorret',extra:true},
  {id:'c9a',t:'La tarifa aplicada coincide con la de la cuenta.',auto:'tarifa',extra:true},
  {id:'c9b',t:'Las tarifas y las bases mínimas de las cuentas de retención corresponden a la tabla de retención en la fuente 2026.',auto:'tabla',extra:true},
@@ -12572,20 +12658,20 @@ function xVerif(wb,d){
   H.forEach((t,i)=>{const x=ws.getCell(1,i+1);x.value=t;x.font=xf({bold:true});x.border={bottom:{style:'medium',color:{argb:XC.navy}}};x.alignment={vertical:'middle',wrapText:true};});
   const L=d.lines||[];const m=d.muestraDocs||new Set();let r=2;
   for(const x of L){
-    const fl=(d.flags&&d.flags[x.doc+'|'+x.cta])||[];
+    const fl=(d.flags&&d.flags[x.doc+'|'+x.cta])||[],dian=(d.dianObs&&d.dianObs[x.doc+'|'+x.cta+'|'+x.ter])||null;   // dian: lo que dice el cruce de la línea con la DIAN (recibidos y documentos soporte)
     ws.getCell(r,1).value=x.cta+' - '+x.nom;ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=x.concepto;ws.getCell(r,4).value=x.tipo;
     ws.getCell(r,5).value=x.terRaw||x.ter;ws.getCell(r,6).value=x.terN;
     ws.getCell(r,7).value=x.base==null?null:x.base;ws.getCell(r,8).value=x.ret;
     ws.getCell(r,9).value={formula:`IFERROR(H${r}/G${r},"")`};
-    ws.getCell(r,11).value=fl.join(' · ');
+    ws.getCell(r,11).value=(dian?[dian.obs].concat(fl):fl).join(' · ');
     [7,8,12,13,14].forEach(c=>ws.getCell(r,c).numFmt=XMONEY);ws.getCell(r,9).numFmt='0.00%';
     box(ws,r,1,r,14,{font:xf({})});
-    if(fl.length){ws.getCell(r,11).font=xf({color:{argb:'FF9C0006'}});}
+    if(fl.length||(dian&&(dian.est==='dif'||dian.est==='sin'))){ws.getCell(r,11).font=xf({color:{argb:'FF9C0006'}});}else if(dian){ws.getCell(r,11).font=xf({color:{argb:'FF006100'}});}   // rojo: alerta; verde: cruza con la DIAN
     if(m.has(x.doc))box(ws,r,1,r,14,{fill:xfill(XC.muestra)});
     r++;}
   if(r===2){ws.getCell(2,1).value='Sin auxiliar de retenciones cargado.';ws.getCell(2,1).font=xf({italic:true});}
   ws.autoFilter={from:{row:1,column:1},to:{row:Math.max(r-1,2),column:14}};
-  ws.getCell(r+1,1).value='Filas en verde: documentos de la muestra sugerida por la app. Observaciones en rojo: alertas de las revisiones automáticas.';ws.getCell(r+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
+  ws.getCell(r+1,1).value='Filas en verde: documentos de la muestra sugerida por la app. Observaciones en rojo: alertas de las revisiones automáticas; con letra verde: la retención cruza con la DIAN (recibidos o documentos soporte).';ws.getCell(r+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
   xVerifCuadros(ws,d,r);
 }
 
@@ -12848,7 +12934,7 @@ function flagsDe(results){
 }
 function datosPapel(ctx,results,extra){
   const mu=(results||[]).find(r=>r.id==='muestra');
-  const d=Object.assign({client:ctx.client,meta:ctx.meta,period:ctx.period,results,CHECK,form:extra.form,ivaC:extra.ivaC,ex:extra.ex,rules:ctx.rules,tol:ctx.tol,bal:ctx.bal||[],lines:retLines(ctx),flags:flagsDe(results),
+  const d=Object.assign({client:ctx.client,meta:ctx.meta,period:ctx.period,results,CHECK,form:extra.form,ivaC:extra.ivaC,ex:extra.ex,rules:ctx.rules,tol:ctx.tol,bal:ctx.bal||[],lines:retLines(ctx),flags:flagsDe(results),dianObs:((results||[]).find(r=>r.id==='cruceret')||{}).porLinea||{},
     muestraDocs:new Set(mu&&mu.rows?mu.rows.map(x=>x.Documento):[]),muestraN:mu&&mu.rows?mu.rows.length:0,
     recTodos:((results||[]).find(r=>r.id==='dianrec')||{}).todos||[],dsTodos:((results||[]).find(r=>r.id==='ds')||{}).todos||[],baseTodos:((results||[]).find(r=>r.id==='basedian')||{}).todos||[],
     auto:extra.auto||{},emiRows:autoTotales(extra.auto).tiene?((ctx.emi&&ctx.emi.rows)||[]):[],recHdr:(ctx.rec&&ctx.rec.hdr)||null,dsHdr:(ctx.ds&&ctx.ds.hdr)||null,emiHdr:(ctx.emi&&ctx.emi.hdr)||null,
@@ -14359,7 +14445,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega38';
+const APP_ENTREGA='fase4b-entrega39';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
