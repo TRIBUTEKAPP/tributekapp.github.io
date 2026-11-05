@@ -1754,6 +1754,26 @@ function parseDian(rows){
   return{rows:out,hdr:(rows[h.i]||[]).map(x=>x==null?'':String(x).trim())};   // hdr: los títulos de las columnas tal como vienen
 }
 
+/* El reporte de la DIAN puede llegar PARTIDO en varios archivos (p. ej. los recibidos en uno y los emitidos en otro): se tratan como UN solo reporte.
+   partes: [{nombre, r}] con r = el resultado de parseDian de cada archivo. Se conservan todas las filas; solo se quitan las que se REPITEN ENTRE archivos (mismo CUFE; sin CUFE, mismo tipo, número, emisor, receptor y total):
+   dentro de un mismo archivo nada se descarta. Si un archivo trae las columnas en otro orden o distintas, sus filas se acomodan a las del primero (por el nombre de la columna) para que las hojas del Excel salgan alineadas. */
+function unirDian(partes){
+  const nrm=s=>String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const base=partes[0].r.hdr||[],bn=base.map(nrm);
+  const clave=r=>r.cufe?'c|'+r.cufe.toLowerCase():['k',r.tipo,r.pref,r.folio,r.nitE,r.nitR,Math.round(r.total)].join('|');
+  const vistas=new Set(),rows=[],archivos=[],colsDistintas=[];let repetidas=0;
+  partes.forEach((p,i)=>{
+    const hdr=p.r.hdr||[],hn=hdr.map(nrm),igual=hn.length===bn.length&&hn.every((x,j)=>x===bn[j]);
+    let mapa=null;if(i>0&&!igual){mapa=bn.map(n=>n?hn.indexOf(n):-1);colsDistintas.push({nombre:p.nombre,sobran:hn.filter(n=>n&&!bn.includes(n)).length,faltan:bn.filter(n=>n&&!hn.includes(n)).length});}
+    const propias=new Set();let nuevas=0,rep=0;
+    for(const r of p.r.rows){const k=clave(r);
+      if(i>0&&vistas.has(k)){rep++;continue;}   // solo se compara contra lo de los archivos anteriores
+      propias.add(k);rows.push(mapa?Object.assign({},r,{raw:mapa.map(j=>j>=0&&r.raw?r.raw[j]:'')}):r);nuevas++;}
+    propias.forEach(k=>vistas.add(k));repetidas+=rep;archivos.push({nombre:p.nombre,filas:p.r.rows.length,nuevas,repetidas:rep});
+  });
+  return{rows,hdr:base,archivos,repetidas,colsDistintas};
+}
+
 /* Base de un documento de la DIAN: total sin IVA y sin los demás impuestos (ICA, INC, timbre, bolsas, combustibles…) */
 function dianBase(r){if(!r.total)return 0;return (r.total||0)-(r.iva||0)-(r.otros!=null?r.otros:(r.inc||0));}   // siempre: total menos el IVA y todos los demás impuestos (ICA, INC, timbre, bolsas, combustibles…); el «Subtotal» del reporte no se usa
 function parseNomina(sheets){
@@ -2490,7 +2510,7 @@ function ruleRetDian(ctx){
   if(soloAgregado(ctx))return NA('retdian',t,MSG_AGREGADO);
   const dsRows=(ctx.ds&&ctx.ds.rows)||[];
   if(!ctx.rec&&!dsRows.length)return NA('retdian',t,'Falta el reporte de documentos recibidos de la DIAN.');
-  if(!ctx.led)return NA('retdian',t,'Falta el movimiento contable para cruzar.');
+  if(!ctx.led)return NA('retdian',t,'Falta el movimiento contable: esta revisión mira, documento por documento, si se practicó la retención que correspondía según el gasto contabilizado. Sin él sí se hace el cruce de bases con el reporte de retenciones («Base de la DIAN…» y «Retenciones del reporte contra la DIAN»).');
   const porTabla=!/umbral/i.test(String(ctx.client.omitModo||'')),fijo=(ctx.client.omitUvt||10)*ctx.uvt;
   // la cuenta de causación es cualquier gasto, costo o activo (no solo los prefijos de «retención omitida» del perfil), salvo las exclusiones del perfil
   const lista=s=>String(s||'').split(',').map(x=>x.trim()).filter(Boolean),exc=lista(ctx.client.gastoExcl),propios=lista(ctx.client.gasto),causa=c=>(/^(14|15|16|17|18|19|5|6|7)/.test(c)||propios.some(p=>c.startsWith(p)))&&!exc.some(p=>c.startsWith(p));   // además, los prefijos de gasto del perfil (p. ej. la clase 28 de proyectos)
@@ -2542,7 +2562,9 @@ function ruleDianRec(ctx){
   const t='Facturas DIAN recibidas vs. contabilidad';
   if(soloAgregado(ctx))return NA('dianrec',t,MSG_AGREGADO);
   if(!ctx.rec)return NA('dianrec',t,'Falta el reporte de documentos recibidos de la DIAN.');
-  if(!ctx.led)return NA('dianrec',t,'Falta el movimiento contable para cruzar.');
+  if(!ctx.led){   // sin el explorador no se puede ver si cada factura está contabilizada, pero la hoja «DIAN Recibidos» sí muestra cada documento con su cruce de base contra el reporte de retenciones
+    const todos=ctx.rec.rows.filter(r=>/factura|nota|equivalente/i.test(r.tipo)&&!(ctx.client.nit&&r.nitE===nitBase(ctx.client.nit))).map(r=>({r,est:'sinmov'}));
+    return conTodos(NA('dianrec',t,'Falta el movimiento contable para ver si cada factura está contabilizada. El cruce de la base con el reporte de retenciones sí se hizo (hoja «DIAN Recibidos»).'),todos);}
   const byT={};
   const add=(t,a)=>{if(!a)return;const o=byT[t]=byT[t]||new Set();o.add(Math.round(Math.abs(a)));};
   const docs={};
@@ -2568,10 +2590,10 @@ function ruleDS(ctx){
   const t='Documentos soporte y consecutivos';
   if(soloAgregado(ctx))return NA('ds',t,MSG_AGREGADO);
   if(!ctx.ds)return NA('ds',t,'Falta el reporte de la DIAN con documentos soporte emitidos.');
-  if(!ctx.led)return NA('ds',t,'Falta el movimiento contable para cruzar.');
   const nit=nitBase(ctx.client.nit||'');
   const ds=ctx.ds.rows.filter(r=>!nit||!r.nitE||r.nitE===nit);
   if(!ds.length)return NA('ds',t,'El reporte de la DIAN no trae documentos soporte emitidos por el cliente.');
+  if(!ctx.led)return conTodos(NA('ds',t,'Falta el movimiento contable para ver si cada documento soporte está contabilizado y si el consecutivo es continuo. El cruce de la base con el reporte de retenciones sí se hizo (hoja «DIAN DS»).'),ds.map(r=>({r,contab:'Sin explorador',tarde:false})));
   const booked=new Set(),nums={};
   for(const r of ctx.led.rows){const k=keyDoc(r.doc);if(!k||booked.has(k))continue;booked.add(k);const m=k.match(/^([A-Z]+)(\d+)$/);if(m)(nums[m[1]]=nums[m[1]]||[]).push(+m[2]);}
   const dsP=new Set(ds.map(r=>r.pref).filter(Boolean));const range={};
@@ -2655,15 +2677,15 @@ function ruleBaseDian(ctx){
     const sobreMin=!(minBase>0)||it.base>=minBase;
     if(cand.length&&sobreMin){nSinDoc++;const cs=cand.sort((a,b)=>Math.abs(a.base-it.base)-Math.abs(b.base-it.base)).slice(0,3).map(z=>z.doc+' ($'+fm(z.base)+')').join(', ');
       const f=fila('Sin documento contable enlazado','',null,null,'El tercero sí tiene retenciones en el reporte, pero ninguna con esta factura. Posibles: '+cs);rows.push(f);todos.push({it,est:'sindoc',doc:'',baseC:null,dif:null,obs:f.Observación});continue;}
-    if(it.origen==='Doc. equivalente'||!ctx.led||!contabilizado(it)){todos.push({it,est:'na',razon:it.origen==='Doc. equivalente'?'documento equivalente':!ctx.led?'falta el movimiento contable':'no está contabilizado',doc:'',baseC:null,dif:null,obs:ctx.led?'No contabilizado en el período (ver «Facturas DIAN recibidas» y «Documentos soporte»)':''});continue;}
-    if(minBase>0&&it.base>=minBase&&!ex.has(it.ter)){nSinRet++;todos.push({it,est:'sinret',doc:'',baseC:null,dif:null,obs:'Contabilizado, supera la base mínima y no tiene retención en el reporte'});}   // solo informativo: lo lista «Gastos sin retención en la fuente»
+    if(it.origen==='Doc. equivalente'||(ctx.led&&!contabilizado(it))){todos.push({it,est:'na',razon:it.origen==='Doc. equivalente'?'documento equivalente':'no está contabilizado',doc:'',baseC:null,dif:null,obs:ctx.led?'No contabilizado en el período (ver «Facturas DIAN recibidas» y «Documentos soporte»)':''});continue;}   // sin el explorador no se sabe si está contabilizado: se clasifica igual por la base
+    if(minBase>0&&it.base>=minBase&&!ex.has(it.ter)){nSinRet++;todos.push({it,est:'sinret',doc:'',baseC:null,dif:null,obs:ctx.led?'Contabilizado, supera la base mínima y no tiene retención en el reporte':'Supera la base mínima y no tiene retención en el reporte (sin el explorador no se sabe si está contabilizado)'});}   // solo informativo: lo lista «Gastos sin retención en la fuente»
     else{todos.push({it,est:'bajo',doc:'',baseC:null,dif:null,obs:'Base no aplica: está bajo la base mínima o el tercero es exento'});}
   }
   const sinDian=[...docs.values()].filter(o=>!o.usado).length;
   const orden={'Base distinta':0,'Sin documento contable enlazado':1};
   rows.sort((a,b)=>orden[a.Estado]-orden[b.Estado]||Math.abs(b.Diferencia||0)-Math.abs(a.Diferencia||0)||(b['Base DIAN']-a['Base DIAN']));
   const cols=['Estado','Origen','Documento DIAN','Documento contable','Tercero','NIT','Base DIAN','Base reporte','Diferencia','Observación','CUFE','Medio de pago'];
-  const comp=nOk+nDist,cola=(nSinRet?' '+nSinRet+' documento(s) contabilizados superan la base mínima y no tienen retención en el reporte (los lista «Gastos sin retención en la fuente»).':'')+' '+sinDian+' documento(s) del reporte no tienen par en la DIAN descargada y no se compararon.';
+  const comp=nOk+nDist,cola=(nSinRet?(ctx.led?' '+nSinRet+' documento(s) contabilizados superan la base mínima y no tienen retención en el reporte (los lista «Gastos sin retención en la fuente»).':' '+nSinRet+' documento(s) de la DIAN superan la base mínima y no tienen retención en el reporte (sin el explorador no se sabe si están contabilizados).'):'')+' '+sinDian+' documento(s) del reporte no tienen par en la DIAN descargada y no se compararon.';
   const base='Se compararon '+(comp+nAgrup)+' documentos de la DIAN con el reporte de retenciones: '+(nOk+nAgrup)+' con la misma base'+(nAgrup?' ('+nAgrup+' agrupados en otro documento del reporte)':'');
   const shown=rows.slice(0,400);
   if(nDist)return conTodos(R('basedian',t,'err',base+' y '+nDist+' con base distinta.'+(nSinDoc?' Además, '+nSinDoc+' sin documento contable enlazado.':'')+cola,cols,shown),todos);
@@ -3732,12 +3754,13 @@ function fechaFlex(v){
   return null;
 }
 function dianFecha(v){const f=fechaFlex(v);return f?f.iso.slice(0,7):'';}
-function splitDian(parsed,period){
+function splitDian(parsed,period,nit){
   const sinFecha=[];let mesDia=0;   // documentos cuya fecha no se pudo interpretar: se cuentan para avisar, nunca se descartan en silencio
   for(const r of parsed.rows){const f=fechaFlex(r.fecha);if(!f)sinFecha.push(r);else if(f.mesDia)mesDia++;}
   const rows=parsed.rows.filter(r=>!period||dianFecha(r.fecha)===period);
   const isDS=r=>/documento soporte/i.test(r.tipo);
-  const emit=r=>/emitid/i.test(r.grupo||'');
+  const nb=nit?nitBase(nit):'',grupoDe=r=>r.grupo||(nb?(r.nitE===nb?'Emitido':r.nitR===nb?'Recibido':''):'');   // si un archivo no trae la columna «Grupo», se deduce del NIT del cliente: emisor = emitido, receptor = recibido
+  const emit=r=>/emitid/i.test(grupoDe(r));
   return{
     rec:{rows:rows.filter(r=>!emit(r)&&!isDS(r)&&!/nomina|application/i.test(r.tipo)),hdr:parsed.hdr},
     ds:{rows:parsed.rows.filter(r=>isDS(r)&&emit(r)),hdr:parsed.hdr},
@@ -12738,7 +12761,7 @@ function mapaBase(d){const m=new Map();for(const t of (d.baseTodos||[]))m.set(t.
 function xDianRec(wb,d){
   const L=layoutDian(d.recHdr),c0=L.n,cB=colLetra(c0),cR=colLetra(c0+3);
   const cols=L.cols.concat(['BASE (Total sin IVA y demás impuestos)','ESTADO EN CONTABILIDAD','DOCUMENTO EN EL REPORTE DE RETENCIONES','BASE EN EL REPORTE DE RETENCIONES','DIFERENCIA DE BASE','CRUCE DE BASE','COMENTARIO']);
-  const T={ok:['Contabilizada',null],valor:['Tercero sí aparece, valor no coincide',XC.warnBg],no:['No contabilizada',XC.errBg]};
+  const T={ok:['Contabilizada',null],valor:['Tercero sí aparece, valor no coincide',XC.warnBg],no:['No contabilizada',XC.errBg],sinmov:['Sin explorador cargado',null]};
   const mb=mapaBase(d),dinero=Object.fromEntries(L.dinero.concat([c0,c0+3,c0+4]).map(i=>[i,XMONEY]));
   const filas=(d.recTodos||[]).map((t,i)=>{const r=t.r,e=T[t.est],x=mb.get(r),cb=CRUCE_BASE[x?x.est:'na'],n=i+2,obs=observacionListados(r.nitE,r.nomE,d.period),com=comentarioDian(x,obs,'');
     return{vals:L.vals(r).concat([formulaBaseDian(L,n),e[0],x&&x.doc&&x.est!=='agrup'?x.doc:'',x&&x.baseC!=null?Math.round(x.baseC):'',{formula:`IF(${cR}${n}="","",${cB}${n}-${cR}${n})`},textoCruce(x),com]),
@@ -13285,7 +13308,7 @@ const SLOTS=[
  {k:'form',t:'Borrador del formulario 350',h:'Excel con la hoja F350 del cliente (lo mejor), o PDF/imagen: se lee en tu navegador con lectura de imágenes gratuita y tú confirmas los valores en la tabla de abajo.',acc:XLS+',.pdf,.png,.jpg,.jpeg'},
  {k:'led',t:'Movimiento contable (explorador de contabilidad o auxiliares)',h:'Documento, cuenta, tercero, débito y crédito. Sirve el explorador de contabilidad o varios auxiliares de tu programa contable (puedes elegir varios archivos). Habilita los cruces con la DIAN y la búsqueda de retención omitida.',multi:true,acc:XLS},
  {k:'det',t:'Auxiliar de retenciones con base',h:'Auxiliar de tu programa contable por cuenta, tercero y documento con valor base. Habilita tarifas, bases mínimas y duplicados.',acc:XLS},
- {k:'dian',t:'DIAN: movimiento del portal (recibidos y documentos soporte)',h:'El reporte tal como se descarga, con todos los tipos de documento. La app lo separa y filtra por el período.',acc:XLS},
+ {k:'dian',t:'DIAN: movimiento del portal (recibidos y documentos soporte)',h:'El reporte tal como se descarga, con todos los tipos de documento. La app lo separa y filtra por el período. Si el cliente lo envió por partes (por ejemplo, los recibidos en un archivo y los emitidos en otro), elige todos los archivos juntos o agrégalos uno por uno: se tratan como un solo reporte.',multi:true,acc:XLS},
  {k:'nom',t:'Retención por nómina (planillas o reporte de retefuente)',h:'Una o varias hojas con la columna Retefuente.',multi:true,acc:XLS}];
 /* CHECK: la lista de actividades del checklist, definida en el bloque anterior de este mismo archivo */
 
@@ -13522,10 +13545,10 @@ function faltaCargar(){const d=S.data||{};const f=[['el borrador del formulario 
 /* ---- Estados de carga visibles: se muestran al empezar y se quitan al terminar (el núcleo de cargar y ejecutar no cambia) ---- */
 const pausa=()=>new Promise(r=>setTimeout(r,25));   // cede el turno para que el navegador dibuje el estado antes del trabajo pesado
 const btnRun=ok=>`<button class="btn" data-a="run" ${ok&&!S.corriendo?'':'disabled'}>${S.corriendo?'Revisando…':'Ejecutar validación'}</button>${S.corriendo?`<span class="hint" role="status">${esc(mt('RES-EJE-001'))}</span>`:''}`;
-async function cargarConEstado(k,files){
-  const DD=S.imp==='reteica'?S.rica.data:S.imp==='ica'?S.ica.data:S.data;const nombres=files.map(f=>f.name);
+async function cargarConEstado(k,files,opc){   // opc.agregar: se suman estos archivos a los que ya hay en la casilla (el reporte de la DIAN por partes)
+  const DD=S.imp==='reteica'?S.rica.data:S.imp==='ica'?S.ica.data:S.data;const previo=opc&&opc.agregar&&DD[k]&&DD[k].parsed?DD[k]:null,nombres=(previo?previo.names:[]).concat(files.map(f=>f.name));
   DD[k]={names:nombres,busy:mt('CAR-LEE-001')};collectClient();render();await pausa();
-  try{await(S.imp==='reteica'?loadSlotR:S.imp==='ica'?loadSlotI:loadSlot)(k,files);}
+  try{await(S.imp==='reteica'?loadSlotR:S.imp==='ica'?loadSlotI:loadSlot)(k,files,{previoDD:previo});}
   catch(e){console.error(e);}
   finally{const d=DD[k];if(d&&d.busy)DD[k]={names:nombres,err:mt('CAR-LEE-002')};}   // si algo inesperado dejó el espacio «ocupado», no se queda así
   render();   // quita el «Leyendo…» y muestra el resultado
@@ -13536,7 +13559,7 @@ async function ejecutarConEstado(){
   try{if(S.imp==='reteica')runValidationR();else if(S.imp==='ica')runValidationI();else runValidation();}
   finally{S.corriendo=false;render();}
 }
-async function loadSlot(k,files){
+async function loadSlot(k,files,opc){
   const DD=S.imp==='reteica'?S.rica.data:S.imp==='ica'?S.ica.data:S.data;
   const sw=(cur()&&cur().software)||'';   // programa contable del cliente: '' = detectar automáticamente
   const contrato=(tipo,r)=>{const c=validarContrato(tipo,r);return c.ok?c:{ok:false,err:'Leí el archivo, pero sus datos no son confiables: '+c.errores.join('; ')+'. Revisa que sea el reporte correcto.'};};
@@ -13566,7 +13589,13 @@ async function loadSlot(k,files){
   else if(k==='det'){let best=null,last=null;for(const sh of all){const x=leerBases(sh.rows,sw);if(x.err){last=x;continue;}
       const esBases=y=>!!(y&&y.formato&&/bases de retención/.test(y.formato));   // el reporte de bases de SIIGO trae base, retención y tipo de persona
       if(!best||(esBases(x)&&!esBases(best))||(esBases(x)===esBases(best)&&((x.hasBase&&!best.hasBase)||(x.hasBase===best.hasBase&&x.rows.length>best.rows.length))))best=x;}r=best||last||{err:'El archivo está vacío.'};}
-  else if(k==='dian')r=tryEach(parseDian);
+  else if(k==='dian'){   // el reporte puede venir partido en varios archivos: se leen todos y se unen como un solo reporte (antes solo se conservaba el de más filas)
+    const ok=[],mal=[];let ultimo=null;
+    porArchivo.forEach((sh,i)=>{let best=null;for(const s of sh){const x=parseDian(s.rows);if(x.err){ultimo=x;continue;}if(!best||x.rows.length>best.rows.length)best=x;}if(best)ok.push({nombre:files[i].name,r:best});else mal.push(files[i].name);});
+    const previas=(opc&&opc.previoDD&&opc.previoDD.partes)||[];
+    if(!ok.length&&previas.length){const pd=opc.previoDD;DD[k]=Object.assign({},pd,{warn:true,info:pd.info+' · OJO: no pude agregar '+mal.join(', ')+' como reporte de la DIAN: sigue cargado lo anterior'});return;}
+    if(ok.length){const partes=previas.concat(ok);r=unirDian(partes);r.partes=partes;r.sinLeer=mal;names.splice(0,names.length,...partes.map(x=>x.nombre));}
+    else r=ultimo||{err:'El archivo está vacío.'};}
   else if(k==='nom')r=parseNomina(all.map(s=>s.rows));
   else if(k==='form'){
     r=parseForm350Casillas(all.map(s=>s.rows));
@@ -13579,10 +13608,15 @@ async function loadSlot(k,files){
   if(ct&&!ct.ok){DD[k]={names,err:ct.err};return;}
   const n=r.rows?r.rows.length:(k==='nom'?r.n:Object.keys(r.form||{}).length);
   if(k==='form'&&r.viaCasillas){S.data.form={names,parsed:r,info:r.casillas+' casillas leídas del formulario'+(r.ok130?' · la suma de los conceptos coincide con la casilla 130':' · la suma de los conceptos NO coincide con la casilla 130: revisa la tabla'),warn:!r.ok130};return;}
-  const sp=k==='dian'?splitDian(r,S.period):null;
+  const sp=k==='dian'?splitDian(r,S.period,cur()&&cur().nit):null;
   const info=k==='dian'?r.rows.length.toLocaleString('es-CO')+' filas · '+sp.rec.rows.length+' recibidos en '+S.period+' · '+sp.ds.rows.length+' documentos soporte emitidos'+(sp.fuera-sp.sinFecha?' · '+(sp.fuera-sp.sinFecha)+' filas fuera del período se ignoran':''):k==='nom'?r.n+' empleados con retención en '+r.hojas+' hoja(s)':k==='form'?n+' conceptos reconocidos':n.toLocaleString('es-CO')+' filas leídas'+(r.hasBase?' · incluye base':'')+(k==='led'&&r.archivos>1?' · de '+r.archivos+' archivos':'')+((k==='led'||k==='det')&&r.formato?' · '+r.formato:'');
   let info2=info,warn2=false;
-  if(k==='dian'&&sp){const ex=[];   // los documentos con fecha ilegible nunca se descartan en silencio
+  if(k==='dian'&&sp){const ex=[];
+    if(r.partes&&r.partes.length>1){ex.push(r.partes.length+' archivos unidos como un solo reporte: '+r.archivos.map(a=>a.nombre+' ('+a.filas.toLocaleString('es-CO')+' filas)').join(' + '));
+      if(r.repetidas)ex.push(r.repetidas.toLocaleString('es-CO')+(r.repetidas===1?' fila estaba repetida':' filas estaban repetidas')+' entre archivos (se dejó una)');
+      if(r.colsDistintas.length){ex.push('OJO: '+r.colsDistintas.map(c=>c.nombre).join(', ')+' trae(n) las columnas en otro orden o distintas; se acomodaron a las del primer archivo');warn2=true;}}
+    if(r.sinLeer&&r.sinLeer.length){ex.push('OJO: no pude leer como reporte de la DIAN: '+r.sinLeer.join(', ')+' (no se tuvo en cuenta)');warn2=true;}
+    // los documentos con fecha ilegible nunca se descartan en silencio
     if(sp.sinFecha){ex.push('OJO: '+sp.sinFecha+(sp.sinFecha===1?' documento tiene':' documentos tienen')+' una fecha que no pude interpretar (por ejemplo «'+sp.ejemploSinFecha+'»); no '+(sp.sinFecha===1?'lo':'los')+' incluí en el período, así que el cruce puede quedar incompleto');warn2=true;}
     if(sp.mesDia)ex.push(sp.mesDia+(sp.mesDia===1?' fecha parecía':' fechas parecían')+' mes/día y '+(sp.mesDia===1?'la':'las')+' leí así porque no son válidas como día/mes');
     if(ex.length)info2+=' · '+ex.join(' · ');}
@@ -13597,12 +13631,12 @@ async function loadSlot(k,files){
   if(r.leidoComo){info2+=' · OJO: Leído como '+r.leidoComo+'; tu perfil dice '+r.perfilDice;warn2=true;}   // el lector del programa del perfil no lo reconoció; lo leyó la detección automática
   if((k==='led'||k==='det')&&r.avisos&&r.avisos.length){info2+=' · OJO: '+r.avisos.join(' · ');warn2=true;}
   if(ct&&ct.avisos.length){info2+=' · OJO: '+ct.avisos.join(' · ');warn2=true;}
-  DD[k]={names,parsed:k==='form'?r:r,info:info2,warn:warn2};
+  DD[k]={names,parsed:k==='form'?r:r,info:info2,warn:warn2,partes:k==='dian'?r.partes:undefined};
 }
 function hasForm(){return Object.values(S.form).some(v=>v&&v.ret);}
 function buildCtx(){
   const c=cur(),d=S.data,g=k=>d[k]&&d[k].parsed;
-  const sp=g('dian')?splitDian(g('dian'),S.period):null;
+  const sp=g('dian')?splitDian(g('dian'),S.period,c&&c.nit):null;
   const nube=enriquecerNube({led:g('led'),det:g('det'),rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi});   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
   const nubeInfo=Object.assign({},nube.info,{totalMov:nube.led&&nube.led.rows?nube.led.rows.length:0,totalBases:nube.det&&nube.det.rows?nube.det.rows.length:0,necesitaNit:!!(g('led')&&g('led').sinNit),necesitaCta:!!(g('det')&&g('det').sinCuenta)});
   const uvtL=uvtLista(),uvtP=uvtEfectiva(uvtL,+String(S.period||'').slice(0,4)||new Date().getFullYear(),c.uvtEspecial);   // UVT del año del período; si el cliente tiene una especial, esa
@@ -14116,7 +14150,7 @@ function tabCliente(c){
 }
 function tabArchivos(c){
   const slots=SLOTS.map(s=>{const d=S.data[s.k];const st=d?(d.busy?`<span class="state">${esc(d.names.join(', '))} · ${esc(d.busy)}</span>`:d.err?`<span class="state err">${esc(d.err)}</span>`:`<span class="state ${d.warn?'':'ok'}" ${d.warn?'style="color:var(--warn)"':''}>${esc(d.names.join(', '))} · ${esc(d.info)}</span>`):`<span class="state">${esc(s.h)}</span>`;
-    return `<div class="slot"><div><b>${s.t}</b>${st}</div><div class="row">${d?`<button class="btn ghost" data-a="clearslot" data-k="${s.k}">Quitar</button>`:''}<span class="btn ghost file">${d?'Reemplazar':'Elegir archivo'}<input type="file" accept="${s.acc}" ${s.multi?'multiple':''} data-c="file" data-k="${s.k}" aria-label="${s.t}"></span></div></div>`;}).join('');
+    return `<div class="slot"><div><b>${s.t}</b>${st}</div><div class="row">${d?`<button class="btn ghost" data-a="clearslot" data-k="${s.k}">Quitar</button>`:''}${s.k==='dian'&&d&&d.parsed?`<span class="btn ghost file" title="Suma otro archivo al reporte de la DIAN (por ejemplo, los emitidos si cargaste los recibidos)">Agregar otro archivo<input type="file" accept="${s.acc}" multiple data-c="fileadd" data-k="${s.k}" aria-label="Agregar otro archivo al reporte de la DIAN"></span>`:''}<span class="btn ghost file">${d?'Reemplazar':'Elegir archivo'}<input type="file" accept="${s.acc}" ${s.multi?'multiple':''} data-c="file" data-k="${s.k}" aria-label="${s.t}"></span></div></div>`;}).join('');
   const exIn=k=>`<input type="text" inputmode="numeric" data-num data-c="ex" data-cp="${k}" value="${fmIn(S.ex[k])}" aria-label="Casilla ${k.slice(1)}">`;
   const ivaIn=k=>`<input type="text" inputmode="numeric" data-num data-c="ivac" data-cp="${k}" value="${fmIn(S.ivaC[k])}" aria-label="Casilla ${k.slice(1)}">`;
   if(!S.cas)S.cas={};
@@ -14448,7 +14482,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega40';
+const APP_ENTREGA='fase4b-entrega42';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -14700,6 +14734,7 @@ document.addEventListener('change',async e=>{
   else if(k==='ctaschk'){const P=S.ctasProp;if(!P||!P.items)return;P.items[+el.dataset.i].marcada=el.checked;const b=document.querySelector('[data-a=ctasadd]');if(b)b.textContent='Agregar las seleccionadas ('+P.items.filter(x=>x.marcada).length+')';}
   else if(k==='ctasconc'){const P=S.ctasProp;if(P&&P.items)P.items[+el.dataset.i].concepto=el.value;}
   else if(k==='file'){const files=[...el.files];if(!files.length)return;await cargarConEstado(el.dataset.k,files);render();}
+  else if(k==='fileadd'){const files=[...el.files];if(!files.length)return;await cargarConEstado(el.dataset.k,files,{agregar:true});render();}
   else if(k==='form'){const cp=el.dataset.cp,f=el.dataset.f,o=S.form[cp]=S.form[cp]||{};const val=leerNum(el.value)||0;
     if(['pjBase','pjRet','pnBase','pnRet'].includes(f)){o[f]=val;o.split=true;['pjBase','pjRet','pnBase','pnRet'].forEach(x=>{if(o[x]==null)o[x]=0;});o.base=o.pjBase+o.pnBase;o.ret=o.pjRet+o.pnRet;render();}
     else if(f==='ret'){o.ret=val;if(o.split){o.split=false;['pjBase','pjRet','pnBase','pnRet'].forEach(x=>delete o[x]);}render();}
