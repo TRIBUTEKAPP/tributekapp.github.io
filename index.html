@@ -2992,6 +2992,8 @@ function ricaLibros(ctx){
 }
 function ricaLineas(ctx){
   const pago=ctx.client.ctaPagoRica||'236899';
+  if(ctx.det&&ctx.det.rows&&ctx.det.sinCuenta&&/reteica/i.test(ctx.det.formato||'')){   // informe de impuestos detallados de SIIGO Nube: no trae cuentas; cada bloque «ReteICA n» es una tarifa por mil
+    return ctx.det.rows.filter(r=>!r.pago).map(r=>({cta:'2368',nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:r.ret,tarifa:r.tarifa!=null?r.tarifa:tarifaMil(r.nom),estimada:false,fecha:r.fecha}));}
   if(ctx.det&&ctx.det.rows){
     return ctx.det.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.ret!=null?r.ret:(r.cre-r.deb);
       return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,tarifa:t,estimada:false};});}
@@ -3035,6 +3037,9 @@ function ruleRicaPago(ctx){
 function ruleRicaOportunidad(ctx){
   const t='Oportunidad del pago y de la presentación frente al calendario';
   const rows=[];let tarde=0;const pago=ctx.client.ctaPagoRica||'236899';
+  if(!ctx.led&&ctx.vencePrev&&ctx.det&&ctx.det.sinCuenta){   // el informe de SIIGO Nube trae el pago a la Secretaría de Hacienda como un valor negativo con su fecha
+    for(const r of ctx.det.rows.filter(r=>r.pago)){const f=fechaISO(r.fecha);const d=f?diasEntre(ctx.vencePrev,f):null;if(d!=null&&d>0)tarde++;
+      rows.push({Concepto:'Pago del bimestre anterior ('+r.doc+', según el informe de impuestos)',Fecha:f||'sin fecha',Vencimiento:ctx.vencePrev,Resultado:d==null?'Sin fecha':d>0?d+' día(s) de retraso':d===0?'Último día del plazo':(-d)+' día(s) antes'});}}
   if(ctx.led&&ctx.vencePrev){
     for(const r of ctx.led.rows.filter(r=>r.cta.startsWith(pago)&&r.deb>0)){const f=fechaISO(r.fecha);const d=f?diasEntre(ctx.vencePrev,f):null;if(d!=null&&d>0)tarde++;
       rows.push({Concepto:'Pago del bimestre anterior ('+r.doc+')',Fecha:f||'sin fecha',Vencimiento:ctx.vencePrev,Resultado:d==null?'Sin fecha':d>0?d+' día(s) de retraso':d===0?'Último día del plazo':(-d)+' día(s) antes'});}}
@@ -3080,7 +3085,7 @@ function ruleRicaDetalle(ctx){
   const t='Detalle de la retención por tarifa de ICA';
   const L=ricaLineas(ctx);if(!L)return NA('detalle',t,'Falta el auxiliar de retención de ICA o el movimiento contable.');
   const lb=ctx.bal?ricaLibros(ctx):null;const g={};
-  for(const x of L){const o=g[x.cta]=g[x.cta]||{cta:x.cta,nom:x.nom,tarifa:x.tarifa,base:0,ret:0,n:0};o.base+=x.base||0;o.ret+=x.ret;o.n++;}
+  for(const x of L){const o=g[x.cta+'|'+x.nom]=g[x.cta+'|'+x.nom]||{cta:x.cta,nom:x.nom,tarifa:x.tarifa,base:0,ret:0,n:0};o.base+=x.base||0;o.ret+=x.ret;o.n++;}
   const rows=[];let errB=0,warnT=0,tb=0,tr=0;
   for(const o of Object.values(g).sort((a,b)=>a.cta<b.cta?-1:1)){
     const prueba=o.tarifa!=null?o.base*o.tarifa/1000:null;const a=lb&&lb.ret.find(z=>z.cta===o.cta);const bal=a?-a.sf:null;
@@ -3886,10 +3891,11 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
   return{err:propio.err.replace(/\.$/,'')+', y la detección automática tampoco lo reconoce. Revisa que sea el reporte correcto o cambia el programa en el perfil del cliente.'};
 }
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
-const autoBases=rows=>{let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err)x=parseImpuestosDetallados(rows);if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
+const autoBases=(rows,fam)=>{let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
+  if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
 function leerMovimiento(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'movimiento','un movimiento',rows,parseLedger):parseLedger(rows);}
-function leerBases(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'bases','un reporte de retenciones con base',rows,autoBases):autoBases(rows);}
+function leerBases(rows,sw,fam){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'bases','un reporte de retenciones con base',rows,r=>autoBases(r,fam)):autoBases(rows,fam);}
 function leerBalancePdf(lines,sw){const a=sw?adaptadorPor(sw):null;if(!a)return parseBalanceLines(lines);
   let propio;
   if(a.estado==='esqueleto')propio={err:msgEsqueleto(a)};
@@ -12177,28 +12183,40 @@ function parseMovimientoCuentaNube(rows){
   if(mal.length)avisos.push('El total de '+mal.length+' cuenta(s) del reporte no coincide con la suma de sus movimientos (por ejemplo '+mal.slice(0,3).join(', ')+'): revisa que el reporte esté completo.');
   return{rows:out,hasBase:false,formato:'SIIGO Nube · movimiento auxiliar de cuenta',corte:enc.corte,corteTxt:enc.corteTxt,nit:enc.nit,entidad:enc.entidad,sinNit:true,avisos};
 }
-function parseImpuestosDetallados(rows){
+/* Tarifa por mil del título de un bloque «Impuesto: ReteICA 8.66» (también «8,66»): es la tarifa de la retención de ICA de Bogotá (por mil) */
+function tarifaImpuestoNube(imp){const m=String(imp||'').match(/reteica\s*([0-9]+(?:[.,][0-9]+)?)/i);return m?parseFloat(m[1].replace(',','.')):null;}
+/* ¿El tercero es una autoridad tributaria? Un valor negativo a su nombre en el informe es el PAGO del impuesto, no una retención practicada */
+function esAutoridadTributaria(nit,nombre){return nit==='899999061'||/secretar[ií]a\s+(distrital\s+)?de\s+hacienda|direcci[oó]n\s+(distrital\s+)?de\s+impuestos|\bdian\b/i.test(String(nombre||''));}
+/* fam: 'retefuente' (el 350, como siempre) o 'reteica' (el 131 de Bogotá): decide qué bloques «Impuesto: …» del informe se leen */
+function parseImpuestosDetallados(rows,fam){
+  const esRica=fam==='reteica',famRx=esRica?/^reteica/i:/^retefuente/i;
   const tx=v=>String(v==null?'':v).trim();let hi=-1,c=null;
   for(let i=0;i<Math.min(rows.length,40);i++){const t=(rows[i]||[]).map(normNube);
     const cm=t.indexOf('comprobante'),id=t.indexOf('identificacion'),te=t.indexOf('nombretercero'),f=t.findIndex(x=>/^fechaelaboracion/.test(x)),bv=t.indexOf('baseventas'),iv=t.indexOf('valorimpuestoventas'),bc=t.indexOf('basecompras'),ic=t.indexOf('valorimpuestocompras');
     if(cm>=0&&id>=0&&f>=0&&bc>=0&&ic>=0){hi=i;c={cm,id,te,f,bv,iv,bc,ic,bdv:t.indexOf('basedevolucionventas'),idv:t.findIndex(x=>/^valorimpuestodevolucionventas/.test(x)),bdc:t.indexOf('basedevolucioncompras'),idc:t.findIndex(x=>/^valorimpuestodevolucioncompras/.test(x))};break;}}
   if(hi<0)return{err:'No encontré el encabezado del informe de impuestos detallados de SIIGO Nube (Comprobante, Identificación, Fecha elaboración, Base compras, Valor impuesto compras).'};
-  const g=(r,k)=>k>=0?num(r[k])||0:0;const out=[],omitidos=new Map();let imp=null,cab=null,nVentas=0;const control=new Map();
+  const g=(r,k)=>k>=0?num(r[k])||0:0;const out=[],omitidos=new Map(),pagos=[];let imp=null,cab=null,nVentas=0;const control=new Map();
   for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[];const a=tx(r[c.cm]);if(!a||/^procesado/i.test(a))continue;
     let m;if((m=a.match(/^Impuesto:\s*(.+)$/i))){imp=m[1].trim();cab={base:g(r,c.bc),val:g(r,c.ic)};control.set(imp,{cab,base:0,val:0});continue;}
     if(/^Tipo:/i.test(a)){imp=null;continue;}
     const fe=fechaNube(r[c.f]);if(!imp||!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fe))continue;
-    if(!/^retefuente/i.test(imp)){omitidos.set(imp,(omitidos.get(imp)||0)+1);continue;}   // ReteIVA, ReteICA…: no son retención en la fuente a título de renta
-    const ctl=control.get(imp),bC=g(r,c.bc),vC=g(r,c.ic),bD=g(r,c.bdc),vD=g(r,c.idc);if(g(r,c.bv)||g(r,c.iv))nVentas++;   // la columna de ventas es la retención que NOS practicaron: no es del 350
-    const base0={fecha:fe,doc:a,cta:'',nom:imp,ter:digits(tx(r[c.id])),terRaw:tx(r[c.id]),terN:c.te>=0?tx(r[c.te]):'',desc:'',cc:'',deb:0,cre:0};
-    if(bC||vC){out.push(Object.assign({},base0,{base:bC,ret:vC}));if(ctl){ctl.base+=bC;ctl.val+=vC;}}
-    if(bD||vD)out.push(Object.assign({},base0,{base:-Math.abs(bD),ret:-Math.abs(vD),devolucion:true}));}   // devolución de compra: resta (signo no verificado con un caso real)
-  if(!out.length)return{err:'No encontré retenciones en la fuente (columnas de compras) en el informe de impuestos detallados de SIIGO Nube.'};
+    if(!famRx.test(imp)){omitidos.set(imp,(omitidos.get(imp)||0)+1);continue;}   // la retención en la fuente y la de ICA van en declaraciones distintas: cada una lee solo lo suyo (ReteIVA y los demás impuestos no se leen)
+    const ctl=control.get(imp),bC=g(r,c.bc),vC=g(r,c.ic),bD=g(r,c.bdc),vD=g(r,c.idc);if(g(r,c.bv)||g(r,c.iv))nVentas++;   // la columna de ventas es la retención que NOS practicaron: no es de la declaración
+    const nitT=digits(tx(r[c.id])),nomT=c.te>=0?tx(r[c.te]):'';
+    const base0={fecha:fe,doc:a,cta:'',nom:imp,ter:nitT,terRaw:tx(r[c.id]),terN:nomT,desc:'',cc:'',deb:0,cre:0};
+    const rica=esRica?{tarifa:tarifaImpuestoNube(imp)}:{};
+    if(bC||vC){const neg=bC<0||vC<0,pago=esRica&&neg&&esAutoridadTributaria(nitT,nomT);   // en ReteICA, un valor negativo a la Secretaría de Hacienda es el pago del impuesto: no cuenta como retención practicada
+      out.push(Object.assign({},base0,{base:bC,ret:vC},rica,esRica?{pago,ajuste:neg&&!pago}:{}));if(ctl){ctl.base+=bC;ctl.val+=vC;}if(pago)pagos.push({doc:a,fecha:fe,base:bC,ret:vC});}
+    if(bD||vD)out.push(Object.assign({},base0,{base:-Math.abs(bD),ret:-Math.abs(vD),devolucion:true},rica));}   // devolución de compra: resta (signo no verificado con un caso real)
+  if(!out.length){const otra=esRica?[...omitidos.keys()].some(k=>/^retefuente/i.test(k)):[...omitidos.keys()].some(k=>/^reteica/i.test(k));
+    return{err:(esRica?'No encontré retención de ICA (bloques «ReteICA») con columnas de compras en el informe de impuestos detallados de SIIGO Nube.':'No encontré retenciones en la fuente (columnas de compras) en el informe de impuestos detallados de SIIGO Nube.')+(otra?(esRica?' Este informe trae retención en la fuente: cárgalo en la pestaña «Retención en la fuente».':' Este informe trae retención de ICA: cárgalo en la pestaña «ReteICA».'):''),informe:true};}
   const enc=encabezadoNube(rows,hi),avisos=[];
-  const mal=[...control].filter(([k,v])=>/^retefuente/i.test(k)&&(Math.abs(v.cab.base-v.base)>1||Math.abs(v.cab.val-v.val)>1)&&!out.some(x=>x.devolucion)).map(([k])=>k);
+  const mal=[...control].filter(([k,v])=>famRx.test(k)&&(Math.abs(v.cab.base-v.base)>1||Math.abs(v.cab.val-v.val)>1)&&!out.some(x=>x.devolucion)).map(([k])=>k);
   if(mal.length)avisos.push('El total de «'+mal[0]+'»'+(mal.length>1?' y de '+(mal.length-1)+' impuesto(s) más':'')+' no coincide con la suma de sus comprobantes: revisa que el informe esté completo.');
-  if(omitidos.size)avisos.push('El informe trae otros impuestos que no se usan en la revisión de retención en la fuente: '+[...omitidos].map(([k,v])=>k+' ('+v+')').join(', ')+'.');
-  return{rows:out,hasBase:true,formato:'SIIGO Nube · informe de impuestos detallados',corte:enc.corte,corteTxt:enc.corteTxt,nit:enc.nit,entidad:enc.entidad,sinCuenta:true,ventasIgnoradas:nVentas,avisos};
+  if(omitidos.size)avisos.push('El informe trae otros impuestos que no se usan en la revisión de '+(esRica?'retención de ICA':'retención en la fuente')+': '+[...omitidos].map(([k,v])=>k+' ('+v+')').join(', ')+'.');
+  if(esRica&&pagos.length)avisos.push(pagos.length+(pagos.length===1?' documento negativo a la Secretaría de Hacienda se tomó':' documentos negativos a la Secretaría de Hacienda se tomaron')+' como pago del impuesto y no como retención practicada: '+pagos.slice(0,3).map(p=>p.doc+' ($'+fm(Math.abs(p.ret))+')').join(', ')+(pagos.length>3?'…':'')+'.');
+  if(esRica&&nVentas)avisos.push('Las columnas de ventas ('+nVentas+' línea(s)) son la retención que te practicaron tus clientes: no entran en el formulario 131.');
+  return{rows:out,hasBase:true,formato:'SIIGO Nube · informe de impuestos detallados'+(esRica?' (ReteICA)':''),corte:enc.corte,corteTxt:enc.corteTxt,nit:enc.nit,entidad:enc.entidad,sinCuenta:true,ventasIgnoradas:nVentas,avisos};
 }
 /* Nombre de un tercero para compararlo entre reportes: sin tildes, sin signos y sin la forma societaria final (SAS, S.A., LTDA…) */
 function normTercero(s){let t=String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();let p;do{p=t;t=t.replace(/\s(S A S|S A|S C A|SAS|SA|SCA|LTDA|LIMITADA|ESP)$/,'');}while(t!==p);return t.replace(/\s+/g,' ').trim();}
@@ -13602,7 +13620,7 @@ async function loadSlot(k,files,opc){
         if(!DD.led)DD.led={names:names.slice(),parsed:{rows:lg.rows,hasBase:false,formato:lg.formato,archivos:1,movRaw:[{archivo:names[0],hoja:lgs.s.name,rows:lgs.s.rows}]},info:lg.rows.length.toLocaleString('es-CO')+' filas leídas · '+lg.formato+' · tomado de la hoja de movimiento del mismo libro'};}}}}
   else if(k==='led'){const ok=[],raws=[];let last=null;porArchivo.forEach((sh,i)=>{let best=null,bs=null;for(const s of sh){const x=leerMovimiento(s.rows,sw);if(x.err){last=x;continue;}if(!best||x.rows.length>best.rows.length){best=x;bs=s;}}if(best){ok.push(best);raws.push({archivo:names[i],hoja:bs.name,rows:bs.rows});}});   // raws: el archivo tal como llegó, para la hoja «Mov» del Excel (solo en memoria)
     r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice}:(last||{err:'El archivo está vacío.'});}
-  else if(k==='det'){let best=null,last=null;for(const sh of all){const x=leerBases(sh.rows,sw);if(x.err){last=x;continue;}
+  else if(k==='det'){let best=null,last=null;const fam=S.imp==='reteica'?'reteica':'retefuente';for(const sh of all){const x=leerBases(sh.rows,sw,fam);if(x.err){last=x;continue;}
       const esBases=y=>!!(y&&y.formato&&/bases de retención/.test(y.formato));   // el reporte de bases de SIIGO trae base, retención y tipo de persona
       if(!best||(esBases(x)&&!esBases(best))||(esBases(x)===esBases(best)&&((x.hasBase&&!best.hasBase)||(x.hasBase===best.hasBase&&x.rows.length>best.rows.length))))best=x;}r=best||last||{err:'El archivo está vacío.'};}
   else if(k==='dian'){   // el reporte puede venir partido en varios archivos: se leen todos y se unen como un solo reporte (antes solo se conservaba el de más filas)
@@ -14498,7 +14516,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega43';
+const APP_ENTREGA='fase4b-entrega44';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
