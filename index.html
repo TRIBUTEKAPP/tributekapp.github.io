@@ -2358,7 +2358,8 @@ function ruleCuadre(ctx){
       if(otro&&an.sinCuenta.includes(otro)&&Math.abs(g.valor-(g.f+an.fRet(otro)))<=ctx.tol&&g.f!==g.valor)an2+=' · PISTA: el formulario declara $'+fm(an.fRet(otro))+' en «'+otro+'» y ninguna cuenta está asignada a ese concepto; si esta cuenta corresponde a «'+otro+'», asígnala en el perfil del cliente (Cuentas de retención).';}
     rows.push({Concepto:una?'Cuenta mayor '+m0.cta+' · '+m0.nom:'Cuentas mayores '+g.mayores.map(m=>m.cta).join(' + ')+' · '+g.mayores.map(m=>m.nom).join(' + '),Libros:g.valor,Formulario:g.f,Diferencia:d,Estado:g.est,Nota:det+(g.comp?' · incluye cuentas de compensación por $'+fm(g.comp):'')+' · rubro(s): '+g.rubros.join(' + ')+an2});}
   for(const c of an.sinCuenta){err++;rows.push({Concepto:c+' (sin cuenta mayor en el balance)',Libros:0,Formulario:fRet(c),Diferencia:fRet(c),Estado:'Revisar',Nota:'El formulario declara este rubro pero el balance no trae cuentas de retención asignadas a él.'});}
-  if(an.pos||an.formDev){const l=-an.pos,f=-an.formDev,d=f-l;const bad=Math.abs(d)>ctx.tol;if(bad)err++;
+  // la fila «MENOS RTE FTE (devoluciones)» solo existe si la declaración trae «MENOS RTE FTE» (casilla 129): lo que la app calcula por su cuenta (p. ej. un pago contabilizado como débito en la misma cuenta) no es una devolución
+  if(an.formDev){const l=-an.pos,f=-an.formDev,d=f-l;const bad=Math.abs(d)>ctx.tol;if(bad)err++;
     rows.push({Concepto:'MENOS RTE FTE (devoluciones)',Libros:l,Formulario:f,Diferencia:d,Estado:bad?'Revisar':'OK',Nota:bad?'La diferencia entre el formulario y el movimiento del mes por rubro ($'+fm(an.pos)+') no coincide con lo que el formulario resta en «MENOS RTE FTE» ($'+fm(an.formDev)+').':'Libros: lo que el formulario declara de más frente al movimiento del mes de los rubros con retención devuelta.'});}
   const formNet=CONCEPTS.reduce((s,c)=>s+fRet(c),0)-an.formDev;
   const hs=leafs(ctx.bal,'2365'),saT=-hs.reduce((s,a)=>s+a.sa,0),sfT=-hs.reduce((s,a)=>s+a.sf,0),movT=sfT-saT,valT=bs.modo==='mov'?movT:sfT;
@@ -12544,7 +12545,7 @@ function xFormulario(wb,d){
   const br=balanceRows(d),ro=br.rowOf,bal=d.bal||[];
   if(ro['2365']&&d.rules){
     let q=r+4;const tol=+d.tol||1000;
-    ws.getCell(q,1).value='Cruce del formulario con el balance (cuentas 2365 y 2367)';ws.getCell(q,1).font=xf({bold:true});q++;
+    ws.getCell(q,1).value='Cruce por rubro del formulario con el balance (cuentas 2365 y 2367)';ws.getCell(q,1).font=xf({bold:true});q++;
     ['Concepto','Libros','Formulario','Diferencia','Estado'].forEach((t,i)=>{const x=ws.getCell(q,1+i);x.value=t;x.font=xf({bold:true,color:{argb:XC.white}});x.fill=xfill(XC.navy);x.border=BOX;x.alignment={horizontal:i?'center':'left'};});
     ws.getCell(q,7).value='De dónde sale la contabilidad';ws.getCell(q,7).font=xf({bold:true,color:{argb:XC.white}});ws.getCell(q,7).fill=xfill(XC.navy);ws.mergeCells(q,7,q,9);
     ws.getCell(q-1,8).value='Tolerancia';ws.getCell(q-1,8).font=xf({size:9});ws.getCell(q-1,9).value=tol;ws.getCell(q-1,9).numFmt=XMONEY;ws.getCell(q-1,9).font=xf({size:9});const cTol=`$I$${q-1}`;
@@ -12583,7 +12584,7 @@ function xFormulario(wb,d){
       const qq=q;linea2(nomG(g),libF,g.valor,forF,g.f,det+(mov?' · se cruza el movimiento del período ($'+fm(g.mov||0)+')':' · se cruza el saldo final (columna F), sin importar el saldo inicial, los débitos ni los créditos')+(g.comp?' · incluye cuentas de compensación por $'+fm(g.comp):'')+' · rubro(s): '+g.rubros.join(' + ')+' · si el saldo final no cuadra pero el movimiento sí, la diferencia es el saldo anterior pendiente de pago');
       if(todas&&!mov){const x=estPend(qq,fSA(g.mayores.map(m=>m.cta)),g.expl);x.result=g.est;ws.getCell(qq,5).value=x;}}
     for(const c of an.sinCuenta)linea2(c+' (sin cuenta mayor en el balance)',null,0,`H${rowDe[c]}`,an.fRet(c),'El formulario declara este rubro pero el balance no trae cuentas de retención asignadas a él.');
-    if(an.pos||menosF){const qm=q;linea2('MENOS RTE FTE (devoluciones)',null,-an.pos,`H${rMenos}`,menosF,'Lo que el formulario declara de más frente al movimiento del mes de los rubros con retención devuelta o anulada (calculado por la app), con el signo cambiado.');ws.getCell(qm,2).value=-an.pos;ws.getCell(qm,2).numFmt=XMONEY;ws.getCell(qm,2).font=xf({});}
+    if(menosF){const qm=q;linea2('MENOS RTE FTE (devoluciones)',null,-an.pos,`H${rMenos}`,menosF,'Lo que el formulario declara de más frente al movimiento del mes de los rubros con retención devuelta o anulada (calculado por la app), con el signo cambiado.');ws.getCell(qm,2).value=-an.pos;ws.getCell(qm,2).numFmt=XMONEY;ws.getCell(qm,2).font=xf({});}
     const hasIva=!!(d.ivaC&&(d.ivaC.c131!=null||d.ivaC.c132!=null||d.ivaC.c133!=null));
     const formNet=conceptos.reduce((t,[k2])=>t+fv(k2),0)+menosF;
     const o65=txtB+' de la cuenta 2365, fila '+ro['2365']+' de la hoja «Balance», con el signo cambiado (crédito en positivo).';
@@ -12596,6 +12597,21 @@ function xFormulario(wb,d){
       if(ro['236703'])linea2('132 · Retención de IVA a no residentes (cuenta 236703)',fCta('236703'),vCta('236703'),`H${rI+1}`,iv2.c132||0,txtB+' de la cuenta 236703, fila '+ro['236703']+' de la hoja «Balance», con el signo cambiado.');
       tot('134 · Total retenciones IVA ('+(mov?'movimiento':'saldo final')+' cuenta 2367)','2367',`H${r134}`,(iv2.c131||0)+(iv2.c132||0)-(iv2.c133||0),txtB+' de la cuenta 2367, fila '+ro['2367']+' de la hoja «Balance», con el signo cambiado.');}
     ws.getCell(q+1,1).value='La columna «Libros» son fórmulas que apuntan '+(mov?'al movimiento del período (columna F menos columna C)':'al saldo final (columna F)')+' de la hoja «Balance»; «Formulario» apunta a los totales de esta hoja. «Pendiente mes anterior» = el saldo final no cuadra, pero el movimiento del mes sí: la diferencia es el saldo anterior sin pagar. Haz clic en una celda para ver de dónde sale.';ws.getCell(q+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
+    // --- cuadro de totales: solo las cuentas 2365 y 2367 (si aplica) contra el valor total de la declaración (casilla 136, TOTAL RETENCIONES)
+    {const iv3=d.ivaC||{},ivTot=(iv3.c131||0)+(iv3.c132||0)-(iv3.c133||0),timbre=(d.ex&&d.ex.c135)||0,ap67=!!ro['2367']||!!ivTot;   // la 2367 aplica si el balance la trae o el formulario declara IVA retenido
+      q+=3;ws.getCell(q,1).value='Cuadro de totales: cuenta 2365'+(ap67?' y cuenta 2367':'')+' contra el valor total de la declaración';ws.getCell(q,1).font=xf({bold:true});q++;
+      ['Concepto','Libros','Formulario','Diferencia','Estado'].forEach((t,i)=>{const c=ws.getCell(q,1+i);c.value=t;c.font=xf({bold:true,color:{argb:XC.white}});c.fill=xfill(XC.navy);c.border=BOX;c.alignment={horizontal:i?'center':'left'};});
+      ws.getCell(q,7).value='De dónde sale la contabilidad';ws.getCell(q,7).font=xf({bold:true,color:{argb:XC.white}});ws.getCell(q,7).fill=xfill(XC.navy);ws.mergeCells(q,7,q,9);q++;
+      const sv=cta=>{const a=bal.find(z=>z.cta===cta)||{sa:0,sf:0};return{sa:-a.sa,sf:-a.sf};};   // saldo anterior y final con el crédito en positivo
+      const fila=(txt,libF,libRes,forF,forRes,origen,ctas,bold)=>{const qq=q;linea2(txt,libF,libRes,forF,forRes,origen,bold);
+        if(!mov&&ctas.length){const sa=ctas.reduce((s,c)=>s+sv(c).sa,0),sfv=ctas.reduce((s,c)=>s+sv(c).sf,0),est=estPend(qq,fSA(ctas),false);est.result=estadoRetencion(sfv,sa,sfv-sa,forRes,false,tol,'sf');ws.getCell(qq,5).value=est;}   // «Pendiente mes anterior» también aquí
+        return qq;};
+      const q1=fila('Cuenta 2365 · Retención en la fuente (casilla 130)',fCta('2365'),vCta('2365'),`H${r130}`,formNet,o65+' Formulario: casilla 130 · total retenciones renta y complementario.',['2365']);
+      let q2=null;
+      if(ap67)q2=fila('Cuenta 2367 · Retención de IVA (casilla 134)',ro['2367']?fCta('2367'):null,ro['2367']?vCta('2367'):0,`H${r134}`,ivTot,(ro['2367']?txtB+' de la cuenta 2367, fila '+ro['2367']+' de la hoja «Balance», con el signo cambiado.':'El balance no trae la cuenta 2367 y el formulario declara retención de IVA.')+' Formulario: casilla 134 · total retenciones IVA.',ro['2367']?['2367']:[]);
+      const libTot=vCta('2365')+(q2&&ro['2367']?vCta('2367'):0),ctasT=['2365'].concat(q2&&ro['2367']?['2367']:[]);
+      fila((ap67?'TOTAL cuentas 2365 + 2367':'TOTAL cuenta 2365')+' · valor total de la declaración (casilla 136)',q2&&ro['2367']?`B${q1}+B${q2}`:`B${q1}`,libTot,`H${r136}`,formNet+ivTot+timbre,'Libros: '+(ap67?'cuenta 2365 + cuenta 2367':'cuenta 2365')+' (arriba). Formulario: casilla 136 · TOTAL RETENCIONES de esta hoja (renta y complementario + IVA + timbre).'+(timbre?' Incluye $'+fm(timbre)+' de timbre nacional (casilla 135), que no está en estas cuentas.':''),ctasT,true);
+      ws.getCell(q+1,1).value='Este cuadro cruza solo '+(ap67?'las cuentas 2365 y 2367':'la cuenta 2365')+' contra el total de retenciones de la declaración, sin el detalle por rubro (que está en el cuadro de arriba).';ws.getCell(q+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});}
   }
 }
 
@@ -14482,7 +14498,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega42';
+const APP_ENTREGA='fase4b-entrega43';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
