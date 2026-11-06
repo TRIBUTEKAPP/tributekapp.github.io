@@ -1383,6 +1383,7 @@ function msg(codigo, vars) {
    17 · Normatividad utilizada: UVT por año y estado de cada fuente
    18 · SIIGO Nube: movimiento auxiliar de cuenta e informe de impuestos detallados
    19 · Reporte de retenciones por cuenta y tercero, sin documento
+   20 · Libros de Excel pesados y elección de hojas
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -12281,6 +12282,88 @@ function parseReporteRetenciones(rows){
   if(sinId)avisos.push('En '+sinId+' fila(s) falta la identificación del tercero: no se pueden cruzar con los listados ni con la DIAN.');
   return{rows:out,hasBase:out.some(x=>x.base>0),formato:'Reporte de retenciones por cuenta y tercero (sin documento)',sinDoc:true,avisos};
 }
+/* ########## SECCIÓN 20 · Libros de Excel pesados y elección de hojas ########## */
+/* Algunos libros (el «todo en uno» que envían ciertos clientes) traen hojas «infladas»: cientos de miles de filas vacías con formato (p. ej. el explorador de contabilidad declara 1.045.305 filas y pesa 564 MB de XML
+   aunque solo 3.406 tengan datos). Abrirlas completas con XLSX.read agota la memoria del navegador. Aquí se lee el XLSX en flujo: se descomprime por partes, se ignoran las celdas y filas vacías y se deja de leer la hoja
+   cuando pasan muchas filas seguidas sin datos. Devuelve lo mismo que readSheets: [{name,rows,hidden}] con las filas como arreglos de valores crudos (números, textos) y '' en las celdas vacías. */
+const XLSX_PESADO=25e6,XLSX_VACIAS=20000;
+const _u16=(d,o)=>d[o]|(d[o+1]<<8),_u32=(d,o)=>(d[o]|(d[o+1]<<8)|(d[o+2]<<16)|(d[o+3]<<24))>>>0;
+function zipEntradas(d){   // directorio central de un ZIP: nombre, método, tamaños y posición de cada archivo
+  let fin=-1;for(let i=d.length-22;i>=Math.max(0,d.length-22-65535);i--){if(d[i]===0x50&&d[i+1]===0x4b&&d[i+2]===5&&d[i+3]===6){fin=i;break;}}
+  if(fin<0)throw new Error('no es un ZIP');
+  const n=_u16(d,fin+10);let o=_u32(d,fin+16);const out=[],td=new TextDecoder('utf-8');
+  for(let k=0;k<n;k++){if(_u32(d,o)!==0x02014b50)break;const nl=_u16(d,o+28),el=_u16(d,o+30),cl=_u16(d,o+32);
+    out.push({nombre:td.decode(d.subarray(o+46,o+46+nl)),met:_u16(d,o+10),comp:_u32(d,o+20),sin:_u32(d,o+24),lh:_u32(d,o+42)});o+=46+nl+el+cl;}
+  return out;
+}
+function xlsxPesado(buf,umbral){   // ¿alguna hoja del libro pesa más de 25 MB de XML? (solo mira el directorio del ZIP: no descomprime nada)
+  try{const d=buf instanceof Uint8Array?buf:new Uint8Array(buf);return zipEntradas(d).some(e=>/^xl\/worksheets\/[^/]+\.xml$/i.test(e.nombre)&&e.sin>(umbral||XLSX_PESADO));}catch(e){return false;}
+}
+function _flujoEntrada(d,e){const ini=e.lh+30+_u16(d,e.lh+26)+_u16(d,e.lh+28),datos=d.subarray(ini,ini+e.comp);
+  const src=new ReadableStream({start(c){c.enqueue(datos);c.close();}});return e.met===0?src:src.pipeThrough(new DecompressionStream('deflate-raw'));}
+async function _leerTodo(flujo){const rd=flujo.getReader(),partes=[];let n=0;for(;;){const{done,value}=await rd.read();if(done)break;partes.push(value);n+=value.length;}const o=new Uint8Array(n);let p=0;for(const x of partes){o.set(x,p);p+=x.length;}return o;}
+const _ent=s=>(s.indexOf('&')<0&&s.indexOf('_x')<0)?s:s.replace(/&(#[xX][0-9a-fA-F]+|#\d+|lt|gt|amp|quot|apos);/g,(m,g)=>g==='lt'?'<':g==='gt'?'>':g==='amp'?'&':g==='quot'?'"':g==='apos'?"'":(g[1]==='x'||g[1]==='X')?String.fromCodePoint(parseInt(g.slice(2),16)):String.fromCodePoint(+g.slice(1))).replace(/_x([0-9A-Fa-f]{4})_/g,(m,h)=>String.fromCharCode(parseInt(h,16)));
+const _atributo=(s,n)=>{const m=new RegExp('(?:^|\\s)'+n+'="([^"]*)"').exec(s);return m?m[1]:'';};
+function _cadenasCompartidas(txt){const out=[],re=/<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g;let m;
+  while((m=re.exec(txt))){const x=(m[1]||'').replace(/<rPh\b[\s\S]*?<\/rPh>/g,'');let s='',t;const rt=/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g;while((t=rt.exec(x)))s+=t[1]||'';out.push(_ent(s));}return out;}
+const _colIdx=ref=>{let n=0;for(let i=0;i<ref.length;i++){const c=ref.charCodeAt(i);if(c<65||c>90)break;n=n*26+(c-64);}return n-1;};
+async function _hojaEnFlujo(flujo,ss,limite){
+  const dec=new TextDecoder('utf-8'),rd=flujo.getReader();let buf='',filaNum=0,comenzo=false,vacias=0,ultima=0,maxc=0,cortada=false;const filas=[];
+  const valorDe=(a,x)=>{const t=_atributo(a,'t');let v=/<v>([\s\S]*?)<\/v>/.exec(x);
+    if(t==='inlineStr'||(!v&&x.indexOf('<is')>=0)){const is=/<is>([\s\S]*?)<\/is>/.exec(x);if(!is)return '';let s='',q;const rt=/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g;while((q=rt.exec(is[1])))s+=q[1]||'';return _ent(s);}
+    if(!v||v[1]==='')return '';const s=v[1];
+    if(t==='s')return ss[+s]!=null?ss[+s]:'';if(t==='e')return '';if(t==='str'||t==='d')return _ent(s);if(t==='b')return s==='1';   // las celdas de error (#N/A, #REF!) quedan vacías, como en el lector normal
+    const n=Number(s);return isNaN(n)?_ent(s):n;};
+  for(;;){const{done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
+    if(!comenzo){const i=buf.indexOf('<sheetData');if(i<0){buf=buf.slice(Math.max(0,buf.length-16));continue;}const j=buf.indexOf('>',i);if(j<0){buf=buf.slice(i);continue;}buf=buf.slice(j+1);comenzo=true;}
+    let p=0;
+    for(;;){const i=buf.indexOf('<row',p);if(i<0)break;const e=buf.indexOf('>',i);if(e<0)break;
+      const auto=buf.charCodeAt(e-1)===47;let inner='',fin;
+      if(auto)fin=e+1;else{const j=buf.indexOf('</row>',e);if(j<0)break;inner=buf.slice(e+1,j);fin=j+6;}
+      const rm=/\sr="(\d+)"/.exec(buf.slice(i,e+1)),rn=rm?+rm[1]:filaNum+1;filaNum=rn;
+      let arr=null;
+      if(inner&&(inner.indexOf('<v')>=0||inner.indexOf('<is')>=0)){const rc=/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;let c;
+        while((c=rc.exec(inner))){const x=c[2];if(!x)continue;const v=valorDe(c[1],x);if(v===''||v==null)continue;const rr=/\sr="([A-Z]+)\d+"/.exec(c[1]);if(!rr)continue;const ci=_colIdx(rr[1]);if(!arr)arr=[];arr[ci]=v;if(ci>maxc)maxc=ci;}}
+      if(arr){while(filas.length<rn-1)filas.push([]);filas[rn-1]=arr;vacias=0;ultima=rn;}else vacias++;
+      p=fin;if(ultima&&vacias>=limite){cortada=true;break;}}
+    if(cortada){try{await rd.cancel();}catch(e2){}break;}
+    buf=p>0?buf.slice(p):(buf.indexOf('<row')<0&&buf.length>64?buf.slice(buf.length-64):buf);}
+  for(let r=0;r<filas.length;r++){const a=filas[r]||(filas[r]=[]);for(let c=0;c<=maxc;c++)if(a[c]===undefined)a[c]='';}   // como sheet_to_json con defval '': todas las filas del mismo ancho
+  return{rows:filas,cortada};
+}
+async function leerXlsxEnFlujo(buf,opc){
+  const lim=(opc&&opc.vacias)||XLSX_VACIAS,d=buf instanceof Uint8Array?buf:new Uint8Array(buf),ents=zipEntradas(d),por={};for(const x of ents)por[x.nombre]=x;
+  const td=new TextDecoder('utf-8'),txt=async n=>por[n]?td.decode(await _leerTodo(_flujoEntrada(d,por[n]))):'';
+  const wb=await txt('xl/workbook.xml'),rels=await txt('xl/_rels/workbook.xml.rels'),sst=await txt('xl/sharedStrings.xml'),ss=sst?_cadenasCompartidas(sst):[];
+  const destino={};for(const m of rels.matchAll(/<Relationship\b([^>]*?)\/?>/g)){const id=_atributo(m[1],'Id'),t=_atributo(m[1],'Target');if(id&&t)destino[id]=t;}
+  const hojas=[];
+  for(const m of wb.matchAll(/<sheet\b([^>]*?)\/?>/g)){const nombre=_ent(_atributo(m[1],'name')),estado=_atributo(m[1],'state')||'visible',rid=_atributo(m[1],'r:id')||_atributo(m[1],'id'),t=destino[rid];if(!t)continue;
+    const ruta=t.charAt(0)==='/'?t.slice(1):'xl/'+t;const ent=por[ruta];if(!ent||!/worksheets\//i.test(ruta))continue;
+    const h=await _hojaEnFlujo(_flujoEntrada(d,ent),ss,lim);hojas.push({name:nombre,rows:h.rows,hidden:estado!=='visible',cortada:h.cortada});}
+  return hojas;
+}
+/* Elección de la hoja de un libro con varias hojas (varios meses, hojas ocultas de trabajo, tablas dinámicas…). Antes se tomaba siempre la de más filas, aunque estuviera oculta o fuera de otro período. */
+/* Reporte de la DIAN: se usan TODAS las hojas visibles que sean un reporte de la DIAN (así, al cambiar de período, sigue habiendo datos); las ocultas solo si ninguna visible trae documentos del período; si ninguna hoja trae documentos del período, la más grande (visibles primero). */
+function elegirHojasDian(cands,periodo){
+  const c=cands.map(s=>Object.assign({},s,{en:periodo?s.x.rows.filter(r=>dianFecha(r.fecha)===periodo).length:s.x.rows.length}));
+  const vis=c.filter(s=>!s.hidden),ocu=c.filter(s=>s.hidden);let elegidas,modo='periodo';
+  if(vis.some(s=>s.en>0))elegidas=vis;else if(ocu.some(s=>s.en>0))elegidas=ocu.filter(s=>s.en>0);
+  else{modo='respaldo';const pool=vis.length?vis:c,mejor=pool.slice().sort((a,b)=>b.x.rows.length-a.x.rows.length)[0];elegidas=mejor?[mejor]:[];}
+  return{elegidas,modo,ignoradas:c.filter(s=>!elegidas.includes(s)).map(s=>({name:s.name,hidden:!!s.hidden,en:s.en,filas:s.x.rows.length}))};
+}
+/* Movimiento contable: una sola hoja por archivo. Gana la que tiene movimientos con fecha en el período; luego la visible; luego la que más movimientos tiene en el período; luego la de más filas. */
+function elegirHojaMovimiento(cands,meses){
+  const en=x=>!meses||!meses.length?0:x.rows.filter(r=>{const f=fechaISO(r.fecha);return f&&meses.indexOf(f.slice(0,7))>=0;}).length;
+  const c=cands.map(s=>Object.assign({},s,{en:en(s.x)}));
+  c.sort((a,b)=>((b.en>0)-(a.en>0))||((a.hidden?1:0)-(b.hidden?1:0))||(b.en-a.en)||(b.x.rows.length-a.x.rows.length));
+  return{elegida:c[0],ignoradas:c.slice(1).map(s=>({name:s.name,hidden:!!s.hidden,en:s.en,filas:s.x.rows.length}))};
+}
+/* Meses («AAAA-MM») que cubre el período elegido: el mes de la retención en la fuente, o los dos meses del bimestre de ReteICA */
+function mesesDelPeriodo(imp,period,perRica){
+  if(imp==='reteica'){const b=bimInfo(perRica);return b?[b.anio+'-'+String(b.mesIni).padStart(2,'0'),b.anio+'-'+String(b.mesFin).padStart(2,'0')]:[];}
+  return imp==='retefuente'&&period?[period]:[];
+}
+
 
 
 /* ÍNDICE · checklist — Actividades del checklist
@@ -13429,9 +13512,18 @@ function recortarHoja(ws){
   if(r2>=0)ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:r2,c:Math.max(c2,0)}});return ws;
 }
 async function readSheets(f){
-  const buf=await f.arrayBuffer();const wb=XLSX.read(buf,{type:'array'});
-  return wb.SheetNames.map(n=>({name:n,rows:XLSX.utils.sheet_to_json(recortarHoja(wb.Sheets[n]),{header:1,raw:true,defval:''})}));
+  const buf=await f.arrayBuffer();
+  if(/\.(xlsx|xlsm)$/i.test(f.name)&&xlsxPesado(buf)){   // libro con hojas «infladas» (cientos de miles de filas vacías con formato): se lee en flujo y solo lo que tiene datos
+    if(typeof DecompressionStream==='undefined'||typeof ReadableStream==='undefined')throw Object.assign(new Error('pesado'),{pesado:true});
+    try{return await leerXlsxEnFlujo(buf);}catch(e){throw Object.assign(new Error('pesado'),{pesado:true});}}
+  const wb=XLSX.read(buf,{type:'array'}),ocultas=(wb.Workbook&&wb.Workbook.Sheets)||[];
+  return wb.SheetNames.map((n,i)=>({name:n,hidden:!!(ocultas[i]&&ocultas[i].Hidden),rows:XLSX.utils.sheet_to_json(recortarHoja(wb.Sheets[n]),{header:1,raw:true,defval:''})}));
 }
+/* Texto para la casilla: qué hoja(s) se usaron de un libro con varias y cuáles no */
+function textoHojas(usadas,ign){
+  const u=usadas.length?(usadas.length===1?'hoja «'+usadas[0]+'»':'hojas '+usadas.map(x=>'«'+x+'»').join(', ')):'';let g='';
+  if(ign.length){const oc=ign.filter(x=>x.hidden).length,n=ign.length;g='no se '+(n===1?'usó':'usaron')+' '+n+(n===1?' hoja':' hojas')+(oc?' ('+(oc===n?(n===1?'oculta':'todas ocultas'):oc+(oc===1?' oculta':' ocultas'))+')':'')+': '+ign.slice(0,4).map(x=>'«'+x.name+'»').join(', ')+(n>4?'…':'');}
+  return[u,g].filter(Boolean).join(' · ');}
 
 /* ---- PDF e imágenes ---- */
 function pdfOk(){return typeof window.pdfjsLib!=='undefined';}
@@ -13610,25 +13702,32 @@ async function loadSlot(k,files,opc){
     DD[k]={names,parsed:pdfRes,info:pdfRes.rows.length.toLocaleString('es-CO')+' cuentas leídas del PDF'+(pdfRes.leidoComo?' · OJO: Leído como '+pdfRes.leidoComo+'; tu perfil dice '+pdfRes.perfilDice:'')+(ctP.avisos.length?' · OJO: '+ctP.avisos.join(' · '):''),warn:ctP.avisos.length>0||!!pdfRes.leidoComo};return;
   }
   const porArchivo=[];
-  try{for(const f of files){names.push(f.name);const sh=await readSheets(f);porArchivo.push(sh);all.push(...sh);}}catch(e){DD[k]={names,err:'No pude leer el archivo. Verifica que sea Excel (.xlsx, .xls) o CSV.'};return;}
-  const tryEach=fn=>{let best=null,last=null;for(const s of all){const r=fn(s.rows);if(r.err){last=r;continue;}if(!best||r.rows.length>best.rows.length)best=r;}return best||last||{err:'El archivo está vacío.'};};
+  try{for(const f of files){names.push(f.name);const sh=await readSheets(f);porArchivo.push(sh);all.push(...sh);}}catch(e){DD[k]={names,err:e&&e.pesado?'Este archivo es demasiado pesado para abrirlo en este navegador: Excel guardó cientos de miles de filas vacías. Ábrelo en Excel, borra las filas y columnas sobrantes (Ctrl+Fin te lleva al final real) y guárdalo de nuevo.':'No pude leer el archivo. Verifica que sea Excel (.xlsx, .xls) o CSV.'};return;}
+  const cmpK=(a,b)=>{for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1;}return 0;};
+  const mesesP=mesesDelPeriodo(S.imp,S.period,S.per&&S.per.reteica);   // los meses que se están revisando: la hoja con datos de esos meses gana a una de otro período
+  // entre las hojas de un libro gana la VISIBLE de más filas (antes, la de más filas aunque estuviera oculta); «clave» antepone otros criterios
+  const tryEach=(fn,clave)=>{let best=null,bk=null,last=null;for(const s of all){const r=fn(s.rows);if(r.err){last=r;continue;}const kk=(clave?clave(r,s):[]).concat([s.hidden?0:1,r.rows.length]);if(!best||cmpK(kk,bk)>0){best=r;bk=kk;}}return best||last||{err:'El archivo está vacío.'};};
   let r;
-  if(k==='bal'){r=tryEach(rows=>leerBalance(rows,sw));
+  if(k==='bal'){const corteP=S.imp==='reteica'?(bimInfo(S.per&&S.per.reteica)||{}).fin:S.imp==='retefuente'?S.period:'';r=tryEach(rows=>leerBalance(rows,sw),x=>[corteP&&x.corte===corteP?1:0]);
     // si el balance solo trae el movimiento neto y el mismo libro trae el movimiento por cuenta, los débitos y créditos salen de allí (y el movimiento queda cargado)
-    if(r&&!r.err&&r.netoMes){const lgs=all.map(s=>({s,x:leerMovimiento(s.rows,sw)})).find(o=>!o.x.err&&o.x.rows&&o.x.rows.length),lg=lgs&&lgs.x;
+    if(r&&!r.err&&r.netoMes){const lgc=all.map(s=>({name:s.name,hidden:!!s.hidden,x:leerMovimiento(s.rows,sw),s})).filter(o=>!o.x.err&&o.x.rows&&o.x.rows.length),lgel=lgc.length?elegirHojaMovimiento(lgc,mesesP).elegida:null,lgs=lgel&&{s:lgel.s,x:lgel.x},lg=lgs&&lgs.x;
       if(lg){const c=completarDebCre(r.rows,lg.rows);if(c.cuadre>=0.95){r.rows=c.rows;r.netoMes=false;r.debCre='débitos y créditos tomados de la hoja de movimiento del mismo libro';
         if(!DD.led)DD.led={names:names.slice(),parsed:{rows:lg.rows,hasBase:false,formato:lg.formato,archivos:1,movRaw:[{archivo:names[0],hoja:lgs.s.name,rows:lgs.s.rows}]},info:lg.rows.length.toLocaleString('es-CO')+' filas leídas · '+lg.formato+' · tomado de la hoja de movimiento del mismo libro'};}}}}
-  else if(k==='led'){const ok=[],raws=[];let last=null;porArchivo.forEach((sh,i)=>{let best=null,bs=null;for(const s of sh){const x=leerMovimiento(s.rows,sw);if(x.err){last=x;continue;}if(!best||x.rows.length>best.rows.length){best=x;bs=s;}}if(best){ok.push(best);raws.push({archivo:names[i],hoja:bs.name,rows:bs.rows});}});   // raws: el archivo tal como llegó, para la hoja «Mov» del Excel (solo en memoria)
-    r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice}:(last||{err:'El archivo está vacío.'});}
-  else if(k==='det'){let best=null,last=null;const fam=S.imp==='reteica'?'reteica':'retefuente';for(const sh of all){const x=leerBases(sh.rows,sw,fam);if(x.err){last=x;continue;}
+  else if(k==='led'){const ok=[],raws=[],usadasL=[],ignL=[];let last=null;porArchivo.forEach((sh,i)=>{const cands=[];for(const s of sh){const x=leerMovimiento(s.rows,sw);if(x.err){last=x;continue;}cands.push({name:s.name,hidden:!!s.hidden,x,s});}if(cands.length){const el=elegirHojaMovimiento(cands,mesesP),best=el.elegida;ok.push(best.x);raws.push({archivo:names[i],hoja:best.s.name,rows:best.s.rows});if(cands.length>1){usadasL.push(best.name);ignL.push(...el.ignoradas);}}});   // raws: el archivo tal como llegó, para la hoja «Mov» del Excel (solo en memoria)
+    r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice,hojasTxt:textoHojas(usadasL,ignL)}:(last||{err:'El archivo está vacío.'});}
+  else if(k==='det'){let best=null,bkey=null,last=null;const fam=S.imp==='reteica'?'reteica':'retefuente';for(const sh of all){const x=leerBases(sh.rows,sw,fam);if(x.err){last=x;continue;}
       const esBases=y=>!!(y&&y.formato&&/bases de retención/.test(y.formato));   // el reporte de bases de SIIGO trae base, retención y tipo de persona
-      if(!best||(esBases(x)&&!esBases(best))||(esBases(x)===esBases(best)&&((x.hasBase&&!best.hasBase)||(x.hasBase===best.hasBase&&x.rows.length>best.rows.length))))best=x;}r=best||last||{err:'El archivo está vacío.'};}
+      const kk=[sh.hidden?0:1,esBases(x)?1:0,x.hasBase?1:0,x.rows.length];if(!best||cmpK(kk,bkey)>0){best=x;bkey=kk;}}r=best||last||{err:'El archivo está vacío.'};}
   else if(k==='dian'){   // el reporte puede venir partido en varios archivos: se leen todos y se unen como un solo reporte (antes solo se conservaba el de más filas)
-    const ok=[],mal=[];let ultimo=null;
-    porArchivo.forEach((sh,i)=>{let best=null;for(const s of sh){const x=parseDian(s.rows);if(x.err){ultimo=x;continue;}if(!best||x.rows.length>best.rows.length)best=x;}if(best)ok.push({nombre:files[i].name,r:best});else mal.push(files[i].name);});
+    const ok=[],mal=[],usadasD=[],ignD=[];let ultimo=null,respaldoD=null;
+    porArchivo.forEach((sh,i)=>{const cands=[];for(const s of sh){const x=parseDian(s.rows);if(x.err){ultimo=x;continue;}cands.push({name:s.name,hidden:!!s.hidden,x});}
+      if(!cands.length){mal.push(files[i].name);return;}
+      const el=elegirHojasDian(cands,S.period);if(el.modo==='respaldo')respaldoD=el.elegidas[0].name;
+      el.elegidas.forEach(c=>ok.push({nombre:el.elegidas.length>1?files[i].name+' · «'+c.name+'»':files[i].name,archivo:files[i].name,hoja:c.name,r:c.x}));
+      if(cands.length>1){usadasD.push(...el.elegidas.map(c=>c.name));ignD.push(...el.ignoradas);}});
     const previas=(opc&&opc.previoDD&&opc.previoDD.partes)||[];
     if(!ok.length&&previas.length){const pd=opc.previoDD;DD[k]=Object.assign({},pd,{warn:true,info:pd.info+' · OJO: no pude agregar '+mal.join(', ')+' como reporte de la DIAN: sigue cargado lo anterior'});return;}
-    if(ok.length){const partes=previas.concat(ok);r=unirDian(partes);r.partes=partes;r.sinLeer=mal;names.splice(0,names.length,...partes.map(x=>x.nombre));}
+    if(ok.length){const partes=previas.concat(ok);r=unirDian(partes);r.partes=partes;r.sinLeer=mal;r.hojasTxt=textoHojas(usadasD,ignD);r.respaldoHoja=respaldoD;names.splice(0,names.length,...partes.map(x=>x.nombre));}
     else r=ultimo||{err:'El archivo está vacío.'};}
   else if(k==='nom')r=parseNomina(all.map(s=>s.rows));
   else if(k==='form'){
@@ -13646,7 +13745,8 @@ async function loadSlot(k,files,opc){
   const info=k==='dian'?r.rows.length.toLocaleString('es-CO')+' filas · '+sp.rec.rows.length+' recibidos en '+S.period+' · '+sp.ds.rows.length+' documentos soporte emitidos'+(sp.fuera-sp.sinFecha?' · '+(sp.fuera-sp.sinFecha)+' filas fuera del período se ignoran':''):k==='nom'?r.n+' empleados con retención en '+r.hojas+' hoja(s)':k==='form'?n+' conceptos reconocidos':n.toLocaleString('es-CO')+' filas leídas'+(r.hasBase?' · incluye base':'')+(k==='led'&&r.archivos>1?' · de '+r.archivos+' archivos':'')+((k==='led'||k==='det')&&r.formato?' · '+r.formato:'');
   let info2=info,warn2=false;
   if(k==='dian'&&sp){const ex=[];
-    if(r.partes&&r.partes.length>1){ex.push(r.partes.length+' archivos unidos como un solo reporte: '+r.archivos.map(a=>a.nombre+' ('+a.filas.toLocaleString('es-CO')+' filas)').join(' + '));
+    if(r.hojasTxt)ex.push(r.hojasTxt);if(r.respaldoHoja){ex.push('OJO: ninguna hoja trae documentos de '+S.period+'; se usó «'+r.respaldoHoja+'» (la más grande)');warn2=true;}
+    if(r.partes&&r.partes.length>1){const nArch=new Set(r.partes.map(p=>p.archivo||p.nombre)).size;ex.push(r.partes.length+(nArch===r.partes.length?' archivos unidos':' partes unidas')+' como un solo reporte: '+r.archivos.map(a=>a.nombre+' ('+a.filas.toLocaleString('es-CO')+' filas)').join(' + '));
       if(r.repetidas)ex.push(r.repetidas.toLocaleString('es-CO')+(r.repetidas===1?' fila estaba repetida':' filas estaban repetidas')+' entre archivos (se dejó una)');
       if(r.colsDistintas.length){ex.push('OJO: '+r.colsDistintas.map(c=>c.nombre).join(', ')+' trae(n) las columnas en otro orden o distintas; se acomodaron a las del primer archivo');warn2=true;}}
     if(r.sinLeer&&r.sinLeer.length){ex.push('OJO: no pude leer como reporte de la DIAN: '+r.sinLeer.join(', ')+' (no se tuvo en cuenta)');warn2=true;}
@@ -13660,6 +13760,7 @@ async function loadSlot(k,files,opc){
     if(r.debCre)ex.push(r.debCre);else if(r.netoMes)ex.push('trae solo el movimiento neto del mes (sin débitos ni créditos por separado)');
     if(r.aviso){ex.push(r.aviso);warn2=true;}
     info2=info.replace(' filas leídas',' cuentas leídas')+' · '+ex.join(' · ');}
+  if(k==='led'&&r.hojasTxt)info2+=' · '+r.hojasTxt;
   if((k==='led'||k==='det')&&r.agregado){info2+=' · es por tercero, sin documentos: sirve para cuadrar por jurídicas y naturales; para los cruces con la DIAN carga el libro auxiliar o el movimiento de cuentas';warn2=true;}
   if((k==='led'||k==='det')&&r.corteTxt){info2+=' · corresponde a '+r.corteTxt;if(S.imp==='retefuente'&&r.corte&&r.corte!==S.period){info2+=' · '+mt('LEC-PER-001',{mesArchivo:r.corteTxt,mesElegido:periodoTxt(S.period)});warn2=true;}}
   if(r.leidoComo){info2+=' · OJO: Leído como '+r.leidoComo+'; tu perfil dice '+r.perfilDice;warn2=true;}   // el lector del programa del perfil no lo reconoció; lo leyó la detección automática
@@ -14197,7 +14298,7 @@ function tabArchivos(c){
   const notaAuto=aT.tiene?`<div class="panel"><p class="hint" style="margin:0"><b>Autorretenciones del formulario:</b> bases${aC.exonerados?' · casilla 59 $'+fm(aC.exonerados):''}${aC.conceptos?' · conceptos (60–67 y 113–120) $'+fm(aC.conceptos):''} · retención $${fm(aT.ret)}. La app cruza esos ingresos con las facturas emitidas en la DIAN sin IVA y con el movimiento del período de la cuenta 41; si no cruzan, analiza la cuenta 42. Como la casilla 59 y los conceptos pueden ser bases distintas, prueba cada definición y usa la que cruza (se puede fijar en el perfil). Para el cuadre contra libros esos valores van dentro de «OTROS».</p></div>`:'';
   const noClaude=!(window.claude&&window.claude.use);const cfg=aiCfg()||{};
   const aiPanel=noClaude?`<details class="panel"><summary style="cursor:pointer;font-weight:700">Opcional: lectura asistida del 350 con un servicio de lectura propio</summary><p class="hint" style="margin-top:8px">No hace falta: el PDF ya se lee en tu navegador sin costo. Solo si tienes un servicio de lectura propio con clave de acceso; la clave nunca se escribe aquí.</p><div class="grid"><div class="f wide"><label for="ai_url">Dirección del servicio</label><input id="ai_url" type="text" data-c="aicfg" data-f="url" placeholder="https://lectura-350.tu-usuario.workers.dev" value="${esc(cfg.url||'')}"></div><div class="f"><label for="ai_code">Código de acceso</label><input id="ai_code" type="password" data-c="aicfg" data-f="code" value="${esc(cfg.code||'')}" autocomplete="off"></div></div><p class="hint" style="margin-top:8px">${cfg.url&&cfg.code?'Servicio listo para esta sesión.':'Sin configurar: el PDF se lee en tu navegador.'} El código de acceso no se guarda en el navegador: hay que escribirlo cada vez que se abre la app.</p></details>`:'';
-  return `<div class="panel"><h3>Archivos de ${esc(periodoTxt(S.period))}</h3><p class="hint">Indispensables: el balance de prueba y el borrador del formulario 350 (la declaración de retención en la fuente). Cada archivo adicional activa más revisiones. Todo se procesa en tu navegador.</p>${slots}</div>
+  return `<div class="panel"><h3>Archivos de ${esc(periodoTxt(S.period))}</h3><p class="hint">Indispensables: el balance de prueba y el borrador del formulario 350 (la declaración de retención en la fuente). Cada archivo adicional activa más revisiones. Todo se procesa en tu navegador.</p><p class=\"hint\">Si tu cliente envía todo en un solo libro de Excel, cárgalo en cada casilla: la app toma de él la hoja que corresponde (visible y del período) y no tiene en cuenta las hojas ocultas ni las filas vacías, aunque el archivo pese decenas de megas.</p>${slots}</div>
   <div class="panel"><h3>Borrador del formulario 350</h3><p class="hint">Es el formulario completo, fila por fila y casilla por casilla como lo imprime la DIAN (el número azul es la casilla). Se llena solo al cargar el archivo; corrígelo aquí si algo no se leyó bien. Con las casillas 131 a 134 vacías, la app cruza la 136 contra el saldo de la cuenta 2365; con ellas diligenciadas, cruza la 130 contra la 2365 y la 134 contra la 2367. La app agrupa las casillas por concepto para cuadrarlas contra libros y valida cada columna (jurídicas y naturales).</p><div class="scroll"><table class="t350"><colgroup><col style="width:22%"><col style="width:16.5%"><col style="width:16.5%"><col style="width:16.5%"><col style="width:16.5%"><col style="width:12%"></colgroup><thead><tr><th>Concepto</th><th class="n">Jurídicas · base</th><th class="n">Jurídicas · retención</th><th class="n">Naturales · base</th><th class="n">Naturales · retención</th><th class="n">Total retención</th></tr></thead><tbody>${rows}
    <tr><td><b>130 · Total retenciones renta y complementario</b> (suma de conceptos − casilla 129)</td><td></td><td></td><td></td><td></td><td class="n"><b>${fm(total130())}</b></td></tr>
    <tr><td>131 · Retenciones de IVA a responsables del impuesto sobre las ventas</td><td></td><td></td><td></td><td></td><td>${ivaIn('c131')}</td></tr>
@@ -14516,7 +14617,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega44';
+const APP_ENTREGA='fase4b-entrega45';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
