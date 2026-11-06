@@ -1384,6 +1384,7 @@ function msg(codigo, vars) {
    18 · SIIGO Nube: movimiento auxiliar de cuenta e informe de impuestos detallados
    19 · Reporte de retenciones por cuenta y tercero, sin documento
    20 · Libros de Excel pesados y elección de hojas
+   21 · Depuración de salarios (art. 383 del E.T., procedimiento 1)
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -3618,6 +3619,7 @@ const VALIDACIONES_RTE=[
   ['cuadre','Cuadre del formulario 350 contra libros',ruleCuadre],
   ['iva','Retención de IVA (casillas 131 a 134) contra libros',ruleIva],
   ['nomina','Retención por salarios: nómina vs. libros',ruleNomina],
+  ['salarios','Rentas de trabajo: depuración del art. 383 por empleado',ruleSalarios383],
   ['tarifa','Tarifa aplicada vs. tarifa de la cuenta',ruleTarifa],
   ['tabla','Tarifas y bases de las cuentas contra la tabla de retención 2026',ruleTabla],
   ['tipotarifa','Tarifa aplicada según jurídica o natural',ruleTipoTarifa],
@@ -12364,6 +12366,129 @@ function mesesDelPeriodo(imp,period,perRica){
   return imp==='retefuente'&&period?[period]:[];
 }
 
+/* ########## SECCIÓN 21 · Depuración de salarios (art. 383 del E.T., procedimiento 1) ########## */
+/* Recalcula, empleado por empleado, la depuración y la retención de las rentas de trabajo (procedimiento 1 del Decreto 1625) con la misma secuencia del libro «Depuración Procedimiento 1 Rte fte AUDITORÍA»:
+   ingresos laborales del mes (sin prima ni cesantías) − ingresos no constitutivos (pensión, FSP, salud, aportes voluntarios al RAIS, alimentación hasta 41 UVT) = A;
+   − deducciones del art. 387 (vivienda hasta 100 UVT, salud prepagada hasta 16 UVT, dependientes 10 % hasta 32 UVT) − rentas exentas (AVP y AFC hasta el 30 % y 3.800 UVT al año, otras) = B;
+   renta exenta del 25 % de B (tope 790 UVT al año, redondeada a miles); todo lo restado no puede pasar del 40 % de A ni de 1.340 UVT al año; base gravable = A − lo restado;
+   base en UVT → tabla del art. 383 → retención en UVT × UVT, redondeada a miles. Solo rentas de trabajo (salarios): honorarios y servicios no entran. La prima se calcula aparte y no se valida aquí. */
+const TABLA383=[[0,0,0],[95,0.19,0],[150,0.28,10],[360,0.33,69],[640,0.35,162],[945,0.37,268],[2300,0.39,770]];   // desde (UVT), tarifa marginal, UVT adicionales
+const redondeoMil=n=>Math.round(n/1000)*1000;
+function retencion383EnUvt(x){let f=TABLA383[0];for(const r of TABLA383)if(x>=r[0])f=r;return x<=0?0:(x-f[0])*f[1]+f[2];}   // como el VLOOKUP del libro: la fila cuyo «desde» es el mayor que no pasa de la base
+function depurar383(r,uvt){
+  const n=v=>Number.isFinite(+v)?+v:0,ing=n(r.pagos);
+  const pension=n(r.pension),salud=n(r.salud),avpRais=Math.min(n(r.avpRais),0.25*ing,2500*uvt/12),alim=ing>310*uvt?0:Math.min(n(r.alimentacion),41*uvt),otros=n(r.otrosInc);
+  const incrngo=pension+salud+avpRais+alim+otros,A=ing-incrngo;
+  const vivienda=Math.min(n(r.vivienda),100*uvt),prepagada=Math.min(n(r.prepagada),16*uvt),topeDep=Math.min(0.10*ing,32*uvt);
+  const dependientes=r.dependientesValor!=null?Math.min(n(r.dependientesValor),topeDep):(String(r.dependientes||'').toUpperCase()==='SI'?topeDep:0);
+  const deducciones=vivienda+prepagada+dependientes;
+  const avpAfc=Math.min(n(r.avp)+n(r.afc),0.30*ing,3800*uvt/12),exentas=avpAfc+n(r.otrasExentas),B=A-deducciones-exentas;
+  const exenta25=redondeoMil(Math.min(redondeoMil(0.25*B),790/12*uvt)),limite40=Math.min(Math.round(0.40*A),1340/12*uvt);
+  const aplicado=Math.max(0,Math.min(deducciones+exentas+exenta25,limite40)),base=Math.max(0,A-aplicado),baseUvt=base/uvt,retUvt=retencion383EnUvt(baseUvt),retencion=redondeoMil(retUvt*uvt);
+  return{pagos:ing,incrngo,pension,salud,avpRais,alimentacion:alim,otrosInc:otros,A,vivienda,prepagada,dependientes,deducciones,avpAfc,exentas,B,exenta25,limite40,aplicado,base,baseUvt,retUvt,retencion,uvt};
+}
+const _dpn=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const _dpNum=t=>{const s=String(t).replace(/,/g,'');if(!/^-?\d+(\.\d+)?%?$/.test(s))return NaN;return s.endsWith('%')?parseFloat(s)/100:parseFloat(s);};
+const MESES_DEP={enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12};
+/* Modelo del cliente en PDF («Procedimiento Cálculo de Retención», uno por empleado): líneas de texto con «etiqueta  sin aporte  con aporte» */
+const DEP_PDF=[['pagos',/^1\.?\s*total pagos laborales/],['pension',/^-?\s*aporte pension/],['fsp',/^-?\s*aporte fsp/],['salud',/^-?\s*aporte a salud/],['avpOblig',/^-?\s*avp a fondo obligatorio/],['otrosInc',/^-?\s*otros:?$/],['incrngo',/^2\.?\s*ingresos no constitutivos/],['subA',/^a\.?\s*subtotal base para limite/],['dependientes',/^-?\s*dependientes/],['vivienda',/^-?\s*interes de vivienda/],['prepagada',/^-?\s*salud prepagada/],['avpAfc',/^-?\s*total avp y afc/],['deducciones',/^3\.?\s*deducciones/],['subB',/^b\.?\s*subtotal base para 25/],['exenta25',/^4\.?\s*rentas exentas/],['totalDed',/^total deducciones y rentas/],['limite40',/^limite de beneficios/],['base',/^c\.?\s*ingresos gravables/],['uvt',/^\/?\s*valor de la uvt/],['baseUvt',/^ingresos base expresados en uvt/],['retUvt',/^retencion en uvt/],['retencion',/^valor de la retencion/],['contingente',/^retencion contingente/]];
+function parseDepuracionPdf(lineas){
+  const L=(lineas||[]).map(x=>String(x).replace(/\s+/g,' ').trim()).filter(Boolean);
+  if(!L.some(x=>/^procedimiento calculo de retencion/.test(_dpn(x))))return null;
+  const campos={};let empresa='',nitEmpresa='',nombre='',cc='',mes=null,anio=null;
+  for(let i=0;i<L.length;i++){const l=L[i];let m;
+    if(!empresa&&(m=/^(.+?)\s+-\s+(\d{6,10}-\d)$/.exec(l))){empresa=m[1];nitEmpresa=m[2];continue;}
+    if((m=/^mes\s+(\d{1,2})\s+del\s+(\d{4})/i.exec(l))){mes=+m[1];anio=+m[2];const prev=L[i-1]||'',q=/^(.+?)\s+(\d{5,12})$/.exec(prev);if(q){nombre=q[1];cc=q[2];}continue;}
+    const t=l.split(' ');const nums=[];while(t.length>1&&!isNaN(_dpNum(t[t.length-1]))&&nums.length<2)nums.unshift(_dpNum(t.pop()));
+    if(!nums.length)continue;const etiqueta=_dpn(t.join(' ')).replace(/:$/,'');
+    for(const [k,rx] of DEP_PDF)if(rx.test(etiqueta)&&!(k in campos)){campos[k]=nums.length===1?{sin:null,con:nums[0]}:{sin:nums[0],con:nums[1]};break;}}
+  if(Object.keys(campos).length<12||!cc)return null;
+  const c=k=>campos[k]?campos[k].con:0,s=k=>campos[k]&&campos[k].sin!=null?campos[k].sin:c(k);
+  const conAporte=c('avpAfc')>0;
+  return{fuente:'pdf',empresa,nitEmpresa,nombre,cc,mes,anio,pagos:c('pagos'),prima:0,pension:c('pension')+c('fsp'),salud:c('salud'),avpRais:c('avpOblig'),alimentacion:0,otrosInc:c('otrosInc'),vivienda:c('vivienda'),prepagada:c('prepagada'),dependientesValor:c('dependientes'),avp:c('avpAfc'),afc:0,otrasExentas:0,
+    cliente:{retencion:conAporte?c('retencion'):s('retencion'),retencionSin:s('retencion'),retencionCon:c('retencion'),contingente:c('contingente'),conAporte,base:conAporte?c('base'):s('base'),incrngo:c('incrngo'),exenta25:conAporte?c('exenta25'):s('exenta25'),uvt:c('uvt')}};
+}
+/* Plantilla Excel «PROC1» (CONSULTORCONTABLE): un empleado por hoja; conceptos en una columna, datos en la siguiente y la depuración del cliente más a la derecha */
+function parseDepuracionProc1(rows){
+  let hi=-1,cC=-1,cD=-1,cP=-1;
+  for(let i=0;i<Math.min(rows.length,40)&&hi<0;i++){const t=(rows[i]||[]).map(_dpn);const a=t.indexOf('conceptos'),b=t.indexOf('datos'),d=t.findIndex(x=>/^depuracion/.test(x));if(a>=0&&b>=0&&d>=0){hi=i;cC=a;cD=b;cP=d;}}
+  if(hi<0)return null;
+  const num=v=>typeof v==='number'?v:(v===''||v==null?0:(isNaN(_dpNum(v))?0:_dpNum(v)));
+  let nombre='',cc='',mes=null,anio=null;const antes=[];
+  for(let i=0;i<hi;i++){const r=rows[i]||[];for(const x of r){if(typeof x==='string'){const m=/(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})/i.exec(x);if(m){mes=MESES_DEP[m[1].toLowerCase()];anio=+m[2];}}}
+    const v=r[cC];if(v!==''&&v!=null)antes.push(String(v).trim());}
+  const iid=antes.findIndex(x=>/^\d{5,12}$/.test(x));if(iid>0){cc=antes[iid];nombre=antes[iid-1];}
+  const o={fuente:'proc1',empresa:'',nitEmpresa:'',nombre,cc,mes,anio,pagos:0,prima:0,pension:0,salud:0,avpRais:0,alimentacion:0,otrosInc:0,vivienda:0,prepagada:0,dependientes:'NO',avp:0,afc:0,otrasExentas:0,cliente:{}};
+  let zona='';let uvt=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],lab=_dpn(r[cC]),dato=r[cD],dep=num(r[cP]);
+    if(/^total pagos laborales/.test(lab)){zona='pagos';continue;}if(/^total ingresos mes/.test(lab)){zona='';o.cliente.pagos=dep;continue;}
+    if(/^menos ingresos no constitutivos/.test(lab)){zona='incrngo';continue;}if(/^menos deducciones/.test(lab)){zona='ded';continue;}if(/^menos rentas exentas/.test(lab)){zona='exe';continue;}
+    if(zona==='pagos'){if(/prima|cesantias|intereses sobre cesantias/.test(lab))continue;o.pagos+=num(dato);continue;}
+    if(/^aportes obligatorios a fondos de pensiones|^fondo de solidaridad/.test(lab))o.pension+=num(dato);
+    else if(/^aportes voluntarios a fondos de pensiones obligatorios/.test(lab))o.avpRais+=num(dato);
+    else if(/^aportes obligatorios al sistema de salud/.test(lab))o.salud+=num(dato);
+    else if(/^intereses por prestamos de vivienda/.test(lab))o.vivienda+=num(dato);
+    else if(/^pagos por salud prepagada/.test(lab))o.prepagada+=num(dato);
+    else if(/dependientes \(art 387/.test(lab)||/^seleccione "?si"? si tiene derecho a dependientes/.test(lab))o.dependientes=String(dato).toUpperCase()==='SI'?'SI':'NO';
+    else if(/^aportes a fondos de pensiones voluntarias/.test(lab))o.avp+=num(dato);
+    else if(/^aportes con destino a cuentas afc/.test(lab))o.afc+=num(dato);
+    else if(zona==='exe'&&/^(indemnizaciones|gastos de entierro|otras rentas exentas)/.test(lab))o.otrasExentas+=num(dato);
+    else if(/^valor prima|^valor de la prima/.test(lab))o.prima=dep;
+    else if(/^valor retencion en la fuente art\. ?383/.test(lab))o.cliente.retencion383=dep;
+    else if(/^total retenciones a practicar/.test(lab))o.cliente.retencion=dep;
+    else if(/^base gravable/.test(lab))o.cliente.base=dep;
+    else if(/^subtotal \(a\)/.test(lab)&&o.cliente.A==null)o.cliente.A=dep;
+    else if(/^menos renta exenta -?25/.test(lab))o.cliente.exenta25=dep;
+    if(/^valor uvt/.test(_dpn(r[cC+2]))||/^valor uvt/.test(lab)){const x=(rows[i+1]||[]).concat(rows[i+2]||[]).find(v=>typeof v==='number'&&v>20000);if(x)uvt=x;}}
+  for(const r of rows.slice(0,25)){const t=(r||[]).find(v=>typeof v==='number'&&v>30000&&v<200000);if(!uvt&&t)uvt=t;}
+  o.cliente.uvt=uvt;if(o.cliente.retencion==null)return null;if(!o.cc)return null;o.cliente.conAporte=(o.avp+o.afc)>0;return o;
+}
+/* Base del libro de auditoría («2-Base»): una fila por empleado; solo se toman las rentas de trabajo (las filas de honorarios o servicios con contrato se omiten) */
+const DEP_BASE=[['fecha',/^fecha depuracion/],['nombre',/^nombre y apellidos/],['cc',/^cc$/],['empresa',/^empresa$/],['salario',/^ingrese salario basico/],['integral30',/^ingrese el 30/],['prima',/^prima$/],['vacaciones',/^vacaciones$/],['viaticos',/^viaticos$/],['auxilios',/^auxilios/],['cesantias',/^cesantias/],['comisiones',/^comisiones$/],['otros',/^otros ingresos$/],['valorContrato',/^valor del contrato/],['alimentacion',/^la parte recibida en "?alimentacion/],['avpRais',/^aportes voluntarios a fondos de pensiones obligatorios/],['transporte',/^medios de transporte/],['viaticosOc',/^viaticos ocasionales/],['art572',/^pagos del mes siendo empleado/],['arl',/^aportes a la arl/],['salud',/^aporte obligatorio a salud/],['pension',/^aporte obligatorio a pension/],['vivienda',/^intereses en prestamos/],['prepagada',/^medicina prepagada/],['dependientes',/^deduccion por concepto de dependientes/],['representacion',/^menos: valor recibido para gastos de representacion/],['oficiales',/^menos: valor recibido en exceso/],['maternidad',/^menos: lo recibido en el mes por concepto de licencia/],['avp',/^aportes voluntarios del propio mes a los fondos de pensiones voluntarias/],['afc',/^aportes voluntarios del propio mes a las cuentas de ahorro afc/],['entierro',/^valor de los dineros para gastos de entierro/]];
+function parseBaseAuditoria(rows){
+  let hi=-1;for(let i=0;i<Math.min(rows.length,40)&&hi<0;i++){const t=(rows[i]||[]).map(_dpn);if(t.some(x=>/^nombre y apellidos/.test(x))&&t.some(x=>x==='cc'))hi=i;}
+  if(hi<0)return null;const col={};(rows[hi]||[]).forEach((h,j)=>{const t=_dpn(h).replace(/\s+/g,' ');for(const [k,rx] of DEP_BASE)if(!(k in col)&&rx.test(t)){col[k]=j;break;}});
+  if(col.nombre==null||col.cc==null||col.salario==null)return null;
+  const num=v=>typeof v==='number'?v:(v===''||v==null||isNaN(_dpNum(v))?0:_dpNum(v)),out=[];let omitidos=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],nombre=String(r[col.nombre]==null?'':r[col.nombre]).trim(),cc=String(r[col.cc]==null?'':r[col.cc]).replace(/\D/g,'');if(!nombre||!cc)continue;
+    const g=k=>col[k]==null?0:num(r[col[k]]);
+    const pagos=g('salario')+g('integral30')+g('vacaciones')+g('viaticos')+g('auxilios')+g('comisiones')+g('otros');
+    if(!pagos){omitidos++;continue;}   // sin ingresos laborales: es una fila de honorarios o servicios (contrato) o está vacía
+    const f=col.fecha==null?null:fechaISO(r[col.fecha]);const dep=col.dependientes==null?'NO':String(r[col.dependientes]).toUpperCase()==='SI'?'SI':'NO';
+    out.push({fuente:'base',empresa:col.empresa==null?'':String(r[col.empresa]||'').trim(),nitEmpresa:'',nombre,cc,mes:f?+f.slice(5,7):null,anio:f?+f.slice(0,4):null,pagos,prima:g('prima'),pension:g('pension'),salud:g('salud'),avpRais:g('avpRais'),alimentacion:g('alimentacion'),otrosInc:g('transporte')+g('viaticosOc')+g('art572')+g('arl'),vivienda:g('vivienda'),prepagada:g('prepagada'),dependientes:dep,avp:g('avp'),afc:g('afc'),otrasExentas:g('representacion')+g('oficiales')+g('maternidad')+g('entierro'),cliente:{}});}
+  return out.length?{rows:out,omitidos}:null;
+}
+
+/* Revisión: la depuración del art. 383 de cada empleado contra el modelo del cliente y contra la retención de salarios en libros (cuentas de «rentas de trabajo») */
+function ruleSalarios383(ctx){
+  const t='Rentas de trabajo: depuración del art. 383 por empleado';
+  const S=ctx.sal&&ctx.sal.rows;if(!S||!S.length)return NA('salarios',t,'Falta cargar la depuración de salarios (los modelos del cliente en PDF o Excel, o la base del libro de auditoría).');
+  const uvt=ctx.uvt;if(!uvt)return NA('salarios',t,'No hay valor de la UVT para el año del período.');
+  const tol=ctx.tol||1000,L=lineSource(ctx),libros=new Map(),nombres=new Map();
+  if(L)for(const l of L){if(conceptoCuenta(ctx.rules,l.cta,l.nom)!=='RENTAS DE TRABAJO'||!l.ter)continue;const f=fechaISO(l.fecha);if(f&&ctx.period&&f.slice(0,7)!==ctx.period)continue;libros.set(l.ter,(libros.get(l.ter)||0)+(l.a||0));if(l.terN)nombres.set(l.ter,l.terN);}
+  const per=ctx.period,pad=n=>String(n).padStart(2,'0'),vistos=new Set();
+  const todos=S.map(r=>{vistos.add(String(r.cc));
+    const a=depurar383(r,uvt),conAp=(+r.avp||0)+(+r.afc||0)>0,sin=conAp?depurar383(Object.assign({},r,{avp:0,afc:0}),uvt):a;
+    const cli=r.cliente&&r.cliente.retencion!=null?r.cliente.retencion:null,lib=libros.has(String(r.cc))?libros.get(String(r.cc)):(L?0:null);
+    const dc=cli==null?null:a.retencion-cli,dl=lib==null?null:a.retencion-lib,notas=[];let mal=false,aviso=false;
+    if(dc!=null&&Math.abs(dc)>tol){mal=true;notas.push('La retención del modelo del cliente ($'+fm(cli)+') difiere de la recalculada ($'+fm(a.retencion)+') en $'+fm(Math.abs(dc)));}
+    if(dl!=null&&Math.abs(dl)>tol){mal=true;notas.push('La retención en libros ($'+fm(lib)+') difiere de la recalculada ($'+fm(a.retencion)+') en $'+fm(Math.abs(dl)));}
+    if(r.cliente&&r.cliente.base!=null&&Math.abs(a.base-r.cliente.base)>tol)notas.push('La base gravable del modelo ($'+fm(r.cliente.base)+') difiere de la recalculada ($'+fm(a.base)+')');
+    if(r.prima>0){aviso=true;notas.push('Trae prima de $'+fm(r.prima)+': la retención de la prima se calcula aparte y no se validó');}
+    if(r.cliente&&r.cliente.contingente>0)notas.push('Retención contingente $'+fm(r.cliente.contingente)+' (con aporte voluntario o AFC; sin aporte la retención sería $'+fm(sin.retencion)+')');
+    if(r.mes&&r.anio&&per&&r.anio+'-'+pad(r.mes)!==per){aviso=true;notas.push('El modelo es del mes '+r.mes+' de '+r.anio+' y se está revisando '+per);}
+    return{rec:r,a,sin,cli,lib,dc,dl,estado:mal?'Revisar':'OK',mal,aviso,nota:notas.join(' · ')};});
+  const sinModelo=[...libros].filter(([cc,v])=>!vistos.has(cc)&&Math.abs(v)>tol).map(([cc,v])=>({cc,nombre:nombres.get(cc)||'',lib:v}));
+  const nMal=todos.filter(x=>x.mal).length,nAviso=todos.filter(x=>!x.mal&&(x.aviso||x.nota)).length;
+  const cols=['Empleado','Cédula','Pagos del mes','Base gravable','Retención recalculada','Retención del cliente','Dif. cliente','Retención en libros','Dif. libros','Estado','Nota'];
+  const rows=todos.map(x=>({Empleado:x.rec.nombre,Cédula:x.rec.cc,'Pagos del mes':Math.round(x.a.pagos),'Base gravable':Math.round(x.a.base),'Retención recalculada':x.a.retencion,'Retención del cliente':x.cli==null?'':x.cli,'Dif. cliente':x.dc==null?'':x.dc,'Retención en libros':x.lib==null?'':x.lib,'Dif. libros':x.dl==null?'':x.dl,Estado:x.estado,Nota:x.nota}))
+    .concat(sinModelo.map(s=>({Empleado:s.nombre,Cédula:s.cc,'Pagos del mes':'','Base gravable':'','Retención recalculada':'','Retención del cliente':'','Dif. cliente':'','Retención en libros':s.lib,'Dif. libros':'',Estado:'Revisar',Nota:'Hay retención de rentas de trabajo en libros ($'+fm(s.lib)+') pero no hay modelo de depuración de este empleado'})));
+  const totR=todos.reduce((s,x)=>s+x.a.retencion,0);
+  const resumen=todos.length+(todos.length===1?' empleado':' empleados')+' con la depuración del art. 383 recalculada (retención total $'+fm(totR)+'): '+(todos.length-nMal)+' sin diferencias'+(nMal?'; '+nMal+' con diferencia contra el modelo del cliente o contra libros':'')+(sinModelo.length?'; '+sinModelo.length+' con retención en libros y sin modelo':'')+(nAviso?'; '+nAviso+' con observaciones':'')+'.'+(L?'':' Sin el movimiento contable o el auxiliar no se compara con libros.');
+  const est=nMal?'err':(sinModelo.length||nAviso)?'warn':'ok';
+  const x=R('salarios',t,est,resumen,cols,rows);x.todos=todos;x.sinModelo=sinModelo;x.hayLibros=!!L;return x;
+}
+
 
 
 /* ÍNDICE · checklist — Actividades del checklist
@@ -12381,6 +12506,7 @@ const CHECK=[
  {id:'c5',t:'Asegurarse en el nuevo formato 350 que los valores registrados por concepto de autorretención sean incluidos en a casilla 42 Y 66  Decreto 2201 de 2016'},
  {id:'c6',t:'Solicitar el procedimiento de Retención por salarios y elaborar los cálculos Procedimiento 1 o Procedimiento 2 según el caso.  Usar plantilla'},
  {id:'c7',t:'Solicitar la nómina del mes correspondiente para validar que exista cálculo del procedimiento para todos los casos que aplique y que las bases coincidan con el ingreso del mes. Validar la transmisión electrónica a la DIAN',auto:'nomina'},
+ {id:'c7b',t:'Validar la depuración del artículo 383 del E.T. de cada empleado (rentas de trabajo, procedimiento 1): que el cálculo del cliente, la retención en libros y el recálculo coincidan. La información del cliente queda en el archivo de auditoría solo para rentas de trabajo (hoja «Art. 383» del libro)',auto:'salarios',extra:true},
  {id:'c8',t:'Solicitar el reporte de facturación emitida y recibida del portal de la DIAN y validar que las facturas reportadas como compras se encuentren contabilizadas',auto:'dianrec'},
  {id:'c8r',t:'Verificar, de acuerdo con las bases de retención, que las facturas recibidas de la DIAN tengan retención en la contabilidad cuando corresponda y revisar las que no la tienen',auto:'retdian'},
  {id:'c9',t:'Tomar una muestra representativa del auxiliar de retenciones y solicitar los soportes para verificar el cumplimiento de los requisitos legales.',auto:'muestra'},
@@ -12716,6 +12842,36 @@ function xFormulario(wb,d){
   }
 }
 
+/* ---------- Art. 383: depuración de salarios (rentas de trabajo, procedimiento 1) ---------- */
+/* La información del cliente que se deja en el archivo de auditoría: solo rentas de trabajo, una fila por empleado, con la depuración en fórmulas (se puede seguir paso a paso y corregir). */
+function xArt383(wb,d){
+  const ws=wb.addWorksheet('Art. 383',{views:[{showGridLines:false,state:'frozen',xSplit:3,ySplit:5}]});const uvt=d.uvt||0,tol=+d.tol||1000;
+  const H=['Cons','Empleado','Cédula','Mes','Pagos laborales del mes (sin prima)','Aportes pensión + FSP','Aporte a salud','Aportes voluntarios RAIS (con tope)','Alimentación (con tope)','Otros no constitutivos','Ingresos no constitutivos','Subtotal A','Intereses de vivienda (tope 100 UVT)','Salud prepagada (tope 16 UVT)','Dependientes (10 % y 32 UVT)','Deducciones art. 387','Aportes AVP y AFC (tope 30 % y 3.800 UVT/año)','Otras rentas exentas','Rentas exentas','Subtotal B','Renta exenta 25 % (tope 790 UVT/año)','Límite 40 % (tope 1.340 UVT/año)','Total deducciones y exentas aplicado','Base gravable','Base en UVT','Retención en UVT (tabla art. 383)','Retención recalculada','Retención del cliente','Dif. cliente','Retención en libros','Dif. libros','Estado','Nota'];
+  ws.columns=H.map((h,i)=>({width:i===1?34:i===3?9:i===32?70:i===31?10:16}));
+  ws.getCell('A1').value='Depuración del artículo 383 del Estatuto Tributario · rentas de trabajo (procedimiento 1)';ws.getCell('A1').font=xf({bold:true,size:12});
+  ws.getCell('A2').value='Solo salarios: los honorarios y servicios no entran. La prima se calcula aparte y no se valida. Los valores azules son los datos del cliente; los demás son fórmulas.';ws.getCell('A2').font=xf({size:9,italic:true,color:{argb:'FF595959'}});
+  ws.getCell('B3').value='UVT';ws.getCell('B3').font=xf({bold:true});ws.getCell('C3').value=uvt;ws.getCell('C3').numFmt=XMONEY;ws.getCell('D3').value='Tolerancia';ws.getCell('D3').font=xf({bold:true});ws.getCell('E3').value=tol;ws.getCell('E3').numFmt=XMONEY;
+  H.forEach((h,i)=>{const c=ws.getCell(5,1+i);c.value=h;c.font=xf({bold:true,color:{argb:XC.white}});c.fill=xfill(XC.navy);c.border=BOX;c.alignment={horizontal:'center',vertical:'middle',wrapText:true};});ws.getRow(5).height=62;
+  const azul={color:{argb:'FF1F4E9C'}},tabla=c=>`IF(${c}<=95,0,IF(${c}<=150,(${c}-95)*0.19,IF(${c}<=360,(${c}-150)*0.28+10,IF(${c}<=640,(${c}-360)*0.33+69,IF(${c}<=945,(${c}-640)*0.35+162,IF(${c}<=2300,(${c}-945)*0.37+268,(${c}-2300)*0.39+770))))))`;
+  let r=6;const r0=r;
+  for(const t of d.salTodos){const a=t.a,rec=t.rec,mes=rec.anio&&rec.mes?rec.anio+'-'+String(rec.mes).padStart(2,'0'):'';
+    const vals={A:r-r0+1,B:rec.nombre,C:rec.cc,D:mes,E:a.pagos,F:a.pension,G:a.salud,H:a.avpRais,I:a.alimentacion,J:a.otrosInc,M:a.vivienda,N:a.prepagada,O:a.dependientes,Q:a.avpAfc,R:Math.max(0,a.exentas-a.avpAfc)};
+    for(const [k,v] of Object.entries(vals)){const c=ws.getCell(k+r);c.value=v;if(!['A','B','C','D'].includes(k)){c.numFmt=XMONEY;c.font=xf(azul);}}
+    const F={K:`SUM(F${r}:J${r})`,L:`E${r}-K${r}`,P:`SUM(M${r}:O${r})`,S:`Q${r}+R${r}`,T:`L${r}-P${r}-S${r}`,U:`ROUND(MIN(ROUND(0.25*T${r},-3),790/12*$C$3),-3)`,V:`MIN(ROUND(0.4*L${r},0),1340/12*$C$3)`,W:`MAX(0,MIN(P${r}+S${r}+U${r},V${r}))`,X:`MAX(0,L${r}-W${r})`,Y:`X${r}/$C$3`,Z:tabla('Y'+r),AA:`ROUND(Z${r}*$C$3,-3)`};
+    const R_={K:a.incrngo,L:a.A,P:a.deducciones,S:a.exentas,T:a.B,U:a.exenta25,V:a.limite40,W:a.aplicado,X:a.base,Y:a.baseUvt,Z:a.retUvt,AA:a.retencion};
+    for(const k of Object.keys(F)){const c=ws.getCell(k+r);c.value={formula:F[k],result:R_[k]};c.numFmt=k==='Y'||k==='Z'?'#,##0.00000':XMONEY;c.font=xf({bold:k==='AA'||k==='X'});}
+    const ab=ws.getCell('AB'+r);ab.value=t.cli==null?null:t.cli;ab.numFmt=XMONEY;ab.font=xf(azul);
+    const ad=ws.getCell('AD'+r);ad.value=t.lib==null?null:t.lib;ad.numFmt=XMONEY;ad.font=xf(azul);
+    ws.getCell('AC'+r).value={formula:`IF(AB${r}="","",AA${r}-AB${r})`,result:t.dc==null?'':t.dc};ws.getCell('AE'+r).value={formula:`IF(AD${r}="","",AA${r}-AD${r})`,result:t.dl==null?'':t.dl};
+    ['AC','AE'].forEach(k=>ws.getCell(k+r).numFmt=XMONEY);
+    const es=ws.getCell('AF'+r);es.value={formula:`IF(OR(AND(AB${r}<>"",ABS(AA${r}-AB${r})>$E$3),AND(AD${r}<>"",ABS(AA${r}-AD${r})>$E$3)),"Revisar","OK")`,result:t.estado};es.font=xf({bold:true,color:{argb:t.estado==='OK'?'FF006100':'FF9C0006'}});es.alignment={horizontal:'center'};
+    const no=ws.getCell('AG'+r);no.value=t.nota||'';no.font=xf({size:9,color:{argb:t.mal?'FF9C0006':'FF595959'}});no.alignment={wrapText:true,vertical:'top'};
+    box(ws,r,1,r,33,{border:BOX});r++;}
+  const r1=r-1;ws.getCell('B'+r).value='TOTAL';ws.getCell('B'+r).font=xf({bold:true});
+  for(const k of ['E','K','L','P','S','T','W','X','AA','AB','AD']){const c=ws.getCell(k+r);c.value={formula:`SUM(${k}${r0}:${k}${r1})`};c.numFmt=XMONEY;c.font=xf({bold:true});c.border={top:THIN,bottom:THIN};}
+  if(d.salSin&&d.salSin.length){r+=2;ws.getCell('B'+r).value='Con retención en libros y sin modelo de depuración';ws.getCell('B'+r).font=xf({bold:true,color:{argb:'FF9C0006'}});r++;
+    for(const s of d.salSin){ws.getCell('B'+r).value=s.nombre||'(sin nombre)';ws.getCell('C'+r).value=s.cc;ws.getCell('AD'+r).value=s.lib;ws.getCell('AD'+r).numFmt=XMONEY;ws.getCell('AF'+r).value='Revisar';ws.getCell('AF'+r).font=xf({bold:true,color:{argb:'FF9C0006'}});r++;}}
+}
 /* ---------- Balance ---------- */
 function balanceRows(d){
   const pref=d.balPrefijos||['2365','2367'];
@@ -13038,7 +13194,7 @@ function xAutorret(wb,d){
 function buildPapelTrabajo(ExcelJS,d){
   const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
   const conAuto=autoTotales(d.auto).tiene;
-  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xTablaRf(wb,d);xFormulario(wb,d);if(conAuto)xAutorret(wb,d);xBalance(wb,d);xVerif(wb,d);xDianRec(wb,d);xDianDS(wb,d);if(conAuto)xDianEmi(wb,d);xMov(wb,d);xObs(wb,d);xMesa(wb,d,['fechas','oportunidad','autorret']);
+  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xTablaRf(wb,d);xFormulario(wb,d);if(conAuto)xAutorret(wb,d);xBalance(wb,d);xVerif(wb,d);if(d.salTodos&&d.salTodos.length)xArt383(wb,d);xDianRec(wb,d);xDianDS(wb,d);if(conAuto)xDianEmi(wb,d);xMov(wb,d);xObs(wb,d);xMesa(wb,d,['fechas','oportunidad','autorret']);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
 }
@@ -13077,7 +13233,7 @@ function flagsDe(results){
 }
 function datosPapel(ctx,results,extra){
   const mu=(results||[]).find(r=>r.id==='muestra');
-  const d=Object.assign({client:ctx.client,meta:ctx.meta,period:ctx.period,results,CHECK,form:extra.form,ivaC:extra.ivaC,ex:extra.ex,rules:ctx.rules,tol:ctx.tol,bal:ctx.bal||[],lines:retLines(ctx),flags:flagsDe(results),dianObs:((results||[]).find(r=>r.id==='cruceret')||{}).porLinea||{},
+  const d=Object.assign({client:ctx.client,meta:ctx.meta,period:ctx.period,results,CHECK,form:extra.form,ivaC:extra.ivaC,ex:extra.ex,rules:ctx.rules,tol:ctx.tol,bal:ctx.bal||[],lines:retLines(ctx),flags:flagsDe(results),dianObs:((results||[]).find(r=>r.id==='cruceret')||{}).porLinea||{},salTodos:((results||[]).find(r=>r.id==='salarios')||{}).todos||[],salSin:((results||[]).find(r=>r.id==='salarios')||{}).sinModelo||[],uvt:ctx.uvt,
     muestraDocs:new Set(mu&&mu.rows?mu.rows.map(x=>x.Documento):[]),muestraN:mu&&mu.rows?mu.rows.length:0,
     recTodos:((results||[]).find(r=>r.id==='dianrec')||{}).todos||[],dsTodos:((results||[]).find(r=>r.id==='ds')||{}).todos||[],baseTodos:((results||[]).find(r=>r.id==='basedian')||{}).todos||[],
     auto:extra.auto||{},emiRows:autoTotales(extra.auto).tiene?((ctx.emi&&ctx.emi.rows)||[]):[],recHdr:(ctx.rec&&ctx.rec.hdr)||null,dsHdr:(ctx.ds&&ctx.ds.hdr)||null,emiHdr:(ctx.emi&&ctx.emi.hdr)||null,
@@ -13426,7 +13582,8 @@ const SLOTS=[
  {k:'led',t:'Movimiento contable (explorador de contabilidad o auxiliares)',h:'Documento, cuenta, tercero, débito y crédito. Sirve el explorador de contabilidad o varios auxiliares de tu programa contable (puedes elegir varios archivos). Habilita los cruces con la DIAN y la búsqueda de retención omitida.',multi:true,acc:XLS},
  {k:'det',t:'Auxiliar de retenciones con base',h:'Auxiliar de tu programa contable por cuenta, tercero y documento con valor base. Habilita tarifas, bases mínimas y duplicados.',acc:XLS},
  {k:'dian',t:'DIAN: movimiento del portal (recibidos y documentos soporte)',h:'El reporte tal como se descarga, con todos los tipos de documento. La app lo separa y filtra por el período. Si el cliente lo envió por partes (por ejemplo, los recibidos en un archivo y los emitidos en otro), elige todos los archivos juntos o agrégalos uno por uno: se tratan como un solo reporte.',multi:true,acc:XLS},
- {k:'nom',t:'Retención por nómina (planillas o reporte de retefuente)',h:'Una o varias hojas con la columna Retefuente.',multi:true,acc:XLS}];
+ {k:'nom',t:'Retención por nómina (planillas o reporte de retefuente)',h:'Una o varias hojas con la columna Retefuente.',multi:true,acc:XLS},
+ {k:'sal',t:'Depuración de salarios (art. 383): modelos del cliente',h:'Los modelos «Procedimiento Cálculo de Retención» en PDF (uno por empleado), la plantilla Excel «PROC1» o la base «2-Base» del libro de auditoría; puedes elegir muchos archivos juntos. Solo rentas de trabajo (salarios). Recalcula la depuración de cada empleado y la compara con el modelo del cliente y con libros.',multi:true,acc:XLS+',.pdf'}];
 /* CHECK: la lista de actividades del checklist, definida en el bloque anterior de este mismo archivo */
 
 const CAL_LS='mesa_calendarios_v1';
@@ -13685,6 +13842,30 @@ async function ejecutarConEstado(){
   try{if(S.imp==='reteica')runValidationR();else if(S.imp==='ica')runValidationI();else runValidation();}
   finally{S.corriendo=false;render();}
 }
+/* Depuración de salarios (art. 383): modelos del cliente en PDF («Procedimiento Cálculo de Retención»), plantilla Excel «PROC1» o la base «2-Base» del libro de auditoría. Un registro por empleado y mes. */
+async function loadDepuracion(files){
+  const DD=S.data,names=files.map(f=>f.name);DD.sal={names,busy:mt('CAR-LEE-001')};collectClient();render();await pausa();
+  const recs=[],mal=[];let omit=0;
+  for(const f of files){
+    try{
+      if(/\.pdf$/i.test(f.name)){const lines=await pdfLines(f),r=parseDepuracionPdf(lines);if(r){r.archivo=f.name;recs.push(r);}else mal.push(f.name);}
+      else{const sh=await readSheets(f);let ok=false;for(const s of sh){const b=parseBaseAuditoria(s.rows);if(b){b.rows.forEach(x=>{x.archivo=f.name;recs.push(x);});omit+=b.omitidos;ok=true;continue;}const p=parseDepuracionProc1(s.rows);if(p){p.archivo=f.name;recs.push(p);ok=true;}}if(!ok)mal.push(f.name);}
+    }catch(e){mal.push(f.name+' (no pude leerlo)');}}
+  if(!recs.length){DD.sal={names,err:'No reconocí ningún modelo de depuración de salarios. Sirven los PDF «Procedimiento Cálculo de Retención», la plantilla Excel «PROC1» y la base «2-Base» del libro de auditoría.'+(mal.length?' No reconocí: '+mal.slice(0,4).join(', ')+(mal.length>4?'…':'')+'.':'')};return;}
+  const por=new Map();let repetidos=0;
+  for(const r of recs){const k=r.cc+'|'+r.anio+'|'+r.mes,p=por.get(k);if(p){repetidos++;if(p.cliente&&p.cliente.retencion!=null&&!(r.cliente&&r.cliente.retencion!=null))continue;}por.set(k,r);}   // el modelo del cliente (con su retención) gana a la base del libro de auditoría
+  const rows=[...por.values()],n=f=>rows.filter(r=>r.fuente===f).length,ex=[];
+  ex.push([n('pdf')?n('pdf')+' de PDF':'',n('proc1')?n('proc1')+' de plantilla Excel':'',n('base')?n('base')+' de la base del libro de auditoría':''].filter(Boolean).join(', '));
+  const meses=[...new Set(rows.map(r=>r.anio&&r.mes?r.anio+'-'+String(r.mes).padStart(2,'0'):''))].filter(Boolean),emp=[...new Set(rows.map(r=>r.empresa).filter(Boolean))];
+  if(meses.length)ex.push('mes '+meses.map(m=>periodoTxt(m)).join(', '));if(emp.length===1)ex.push(emp[0]);
+  let warn=false;
+  if(S.imp==='retefuente'&&meses.length&&(meses.length>1||meses[0]!==S.period)){ex.push('OJO: los modelos son de '+meses.map(m=>periodoTxt(m)).join(', ')+' y estás revisando '+periodoTxt(S.period));warn=true;}
+  const cl=cur(),nits=[...new Set(rows.map(r=>r.nitEmpresa).filter(Boolean))];if(cl&&cl.nit&&nits.length&&nits.some(x=>nitBase(x)&&nitBase(cl.nit)&&nitBase(x)!==nitBase(cl.nit))){ex.push('OJO: el NIT de los modelos ('+nits[0]+') no es el del cliente');warn=true;}
+  if(repetidos)ex.push(repetidos+(repetidos===1?' modelo repetido (se dejó uno)':' modelos repetidos (se dejó uno por empleado y mes)'));
+  if(omit)ex.push(omit+(omit===1?' fila de honorarios o servicios omitida':' filas de honorarios o servicios omitidas')+' (solo rentas de trabajo)');
+  if(mal.length){ex.push('OJO: no reconocí '+mal.slice(0,3).join(', ')+(mal.length>3?'…':''));warn=true;}
+  DD.sal={names,parsed:{rows,formato:'Depuración de salarios (art. 383)'},info:rows.length+(rows.length===1?' empleado':' empleados')+' · '+ex.join(' · '),warn};
+}
 async function loadSlot(k,files,opc){
   const DD=S.imp==='reteica'?S.rica.data:S.imp==='ica'?S.ica.data:S.data;
   const sw=(cur()&&cur().software)||'';   // programa contable del cliente: '' = detectar automáticamente
@@ -13692,6 +13873,7 @@ async function loadSlot(k,files,opc){
   const mala=files.find(f=>!/\.(xlsx|xlsm|xls|csv|pdf|png|jpe?g|webp)$/i.test(f.name));   // un Word, un ZIP, etc.
   if(mala){const ext=(mala.name.match(/\.[^.]+$/)||['(sin extensión)'])[0].toLowerCase();DD[k]={names:files.map(f=>f.name),err:mt('LEC-FMT-001',{extension:ext})};return;}
   if(k==='form'&&files.length===1&&/\.(pdf|png|jpe?g|webp)$/i.test(files[0].name)){await loadForm350Image(files[0]);return;}
+  if(k==='sal'){await loadDepuracion(files);return;}
   const names=[],all=[];let pdfRes=null;
   if(k==='bal'&&files.length===1&&/\.pdf$/i.test(files[0].name)){
     names.push(files[0].name);
@@ -13776,7 +13958,7 @@ function buildCtx(){
   const nubeInfo=Object.assign({},nube.info,{totalMov:nube.led&&nube.led.rows?nube.led.rows.length:0,totalBases:nube.det&&nube.det.rows?nube.det.rows.length:0,necesitaNit:!!(g('led')&&g('led').sinNit),necesitaCta:!!(g('det')&&g('det').sinCuenta)});
   const uvtL=uvtLista(),uvtP=uvtEfectiva(uvtL,+String(S.period||'').slice(0,4)||new Date().getFullYear(),c.uvtEspecial);   // UVT del año del período; si el cliente tiene una especial, esa
   return{client:c,period:S.period,meta:pdata().meta,tol:+c.tol||1000,uvt:uvtP.valor,uvtInfo:uvtP,uvtLista:uvtL,rules:c.rules,
-    bal:g('bal')&&g('bal').rows,led:nube.led,det:nube.det,nubeInfo,form:hasForm()?S.form:null,auto:S.auto,emi:sp&&sp.emi,iva:S.iva,ivaDet:ivaDet(),ex:S.ex,vencePrev:venceRetefuente(allCals(),prevP(S.period),c.nit),rec:sp&&sp.rec,ds:sp&&sp.ds,nom:g('nom'),prevDecl:prevDecl()};
+    bal:g('bal')&&g('bal').rows,led:nube.led,det:nube.det,nubeInfo,form:hasForm()?S.form:null,auto:S.auto,sal:g('sal'),emi:sp&&sp.emi,iva:S.iva,ivaDet:ivaDet(),ex:S.ex,vencePrev:venceRetefuente(allCals(),prevP(S.period),c.nit),rec:sp&&sp.rec,ds:sp&&sp.ds,nom:g('nom'),prevDecl:prevDecl()};
 }
 function prevP(p){const[y,m]=p.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function prevDecl(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const c=cur(),pp=c.periods[prevP(S.period)];return pp&&pp.declarado?pp.declarado.total:null;}
@@ -14617,7 +14799,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega45';
+const APP_ENTREGA='fase4b-entrega46';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
