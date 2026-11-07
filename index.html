@@ -1385,6 +1385,7 @@ function msg(codigo, vars) {
    19 · Reporte de retenciones por cuenta y tercero, sin documento
    20 · Libros de Excel pesados y elección de hojas
    21 · Depuración de salarios (art. 383 del E.T., procedimiento 1)
+   22 · Facturas emitidas: cruce factura por factura con la contabilidad
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -1712,22 +1713,27 @@ function parseForm(sheets){
   const res={},iva={v:0,found:false,c131:0,c132:0,c133:0};
   const pats=[['RENTAS DE TRABAJO',/^rentas de trabajo/],['HONORARIOS',/^honorarios/],['COMISIONES',/^comisiones/],['SERVICIOS',/^servicios/],
    ['ARRENDAMIENTOS',/^arrendamientos/],['RENDIMIENTOS FINANCIEROS',/^rendimientos/],['COMPRAS',/^compras/],['EXTERIOR SIN CONVENIO',/^(pagos al )?exterior sin convenio/],['EXTERIOR CON CONVENIO',/^(pagos al )?exterior con convenio/],['EXTERIOR SIN CONVENIO',/^exterior/],['OTROS',/^otros/],
-   ['MENOS RTE FTE',/^menos/],['IVA',/^(rte iva|no residentes|en exceso)/]];
+   ['MENOS RTE FTE',/^menos/],['IVA',/^(rte iva|no residentes|en exceso|a responsables del impuesto|practicadas por servicios a no residentes)/]];
+  let cols=null;   // encabezado con dos «Base» y dos «Retención aplicada» (personas jurídicas y naturales): las columnas se toman de ahí, no por la posición de las últimas cifras
+  for(const rows of sheets){if(cols)break;for(let i=0;i<Math.min(rows.length,60)&&!cols;i++){const bs=[],rs=[];(rows[i]||[]).forEach((x,j)=>{const t=typeof x==='string'?norm(x):'';if(t==='base')bs.push(j);else if(/^retencion( aplicada)?$/.test(t))rs.push(j);});if(bs.length>=2&&rs.length>=2){cols={pjBase:bs[0],pjRet:rs[0],pnBase:bs[1],pnRet:rs[1],tot:null};for(let q=Math.max(0,i-3);q<=i&&cols.tot==null;q++)(rows[q]||[]).forEach((x,j)=>{if(cols.tot==null&&j>rs[1]&&typeof x==='string'&&norm(x)==='total')cols.tot=j;});}}}
   for(const rows of sheets){
     for(const r of rows){
       let lab=null,li=-1;
-      for(let j=0;j<r.length;j++){if(typeof r[j]==='string'&&r[j].trim()){const n=norm(r[j]);if(n.length<40){lab=n;li=j;break;}}}
+      for(let j=0;j<r.length;j++){if(typeof r[j]==='string'&&r[j].trim()){const n=norm(r[j]);if(n.length<40||(n.length<75&&/^(a responsables del impuesto|practicadas por servicios a no residentes)/.test(n))){lab=n;li=j;break;}}}
       if(!lab)continue;
       const p=pats.find(p=>p[1].test(lab));if(!p)continue;
       const cells=r.slice(li+1);const nums=cells.map(v=>typeof v==='number'?v:null).filter(v=>v!=null);
-      if(nums.length<2)continue;
-      const base=nums[nums.length-2],ret=nums[nums.length-1];
+      const totIva=p[0]==='IVA'&&cols&&cols.tot!=null&&typeof r[cols.tot]==='number'?r[cols.tot]:null;   // con encabezado, la retención de IVA va en la columna TOTAL
+      if(nums.length<2&&totIva==null)continue;
+      const base=nums[nums.length-2],ret=totIva!=null?totIva:nums[nums.length-1];
       const n=i=>typeof cells[i]==='number'?cells[i]:0;
-      if(p[0]==='IVA'){iva.found=true;if(/^rte iva/.test(lab))iva.c131+=ret;else if(/^no residentes/.test(lab))iva.c132+=ret;else iva.c133+=Math.abs(ret);iva.v=iva.c131+iva.c132-iva.c133;}
+      if(p[0]==='IVA'){iva.found=true;if(/^(rte iva|a responsables)/.test(lab))iva.c131+=ret;else if(/^(no residentes|practicadas por servicios a no residentes)/.test(lab))iva.c132+=ret;else iva.c133+=Math.abs(ret);iva.v=iva.c131+iva.c132-iva.c133;}
       else if(!res[p[0]]){
         const o={base,ret};
         if(cells.length>=7&&typeof cells[5]==='number'&&typeof cells[6]==='number'&&p[0]!=='MENOS RTE FTE'){
           o.pjBase=n(0);o.pjRet=n(1);o.pnBase=n(2);o.pnRet=n(3);o.split=true;}
+        else if(cols&&p[0]!=='MENOS RTE FTE'){const g=j=>typeof r[j]==='number'?r[j]:0;   // por el encabezado: base y retención de cada bloque (las casillas y el TOTAL de la fila no se confunden con ellas)
+          o.pjBase=g(cols.pjBase);o.pjRet=g(cols.pjRet);o.pnBase=g(cols.pnBase);o.pnRet=g(cols.pnRet);o.split=true;o.base=o.pjBase+o.pnBase;o.ret=o.pjRet+o.pnRet;}
         res[p[0]]=o;}
     }
     if(Object.keys(res).length>=3)break;
@@ -1849,10 +1855,21 @@ function form350FromMap(v){
 }
 function parseForm350Casillas(sheets){
   for(const rows of sheets){
-    const v={};
-    for(const r of rows)for(let j=0;j<r.length-1;j++){const c=r[j];
-      if(typeof c==='number'&&Number.isInteger(c)&&c>=29&&c<=138&&typeof r[j+1]==='number'&&!(c in v)){v[c]=r[j+1];j++;}}
+    const escanear=maxC=>{const v={};let colTot=null;
+      for(const r of rows){const W=Math.min(r.length,maxC+1);for(let j=0;j<W-1;j++){const c=r[j];
+        if(typeof c==='number'&&Number.isInteger(c)&&c>=29&&c<=138&&!(c in v)){
+          let k=j+1;if(c>=129)while(k<W&&k<=j+4&&(r[k]===''||r[k]==null))k++;   // los totales (129 a 138) traen su valor en la columna TOTAL, no pegado al número de casilla
+          if(k<W&&typeof r[k]==='number'){v[c]=r[k];if((c===130||c===136)&&k>j+1&&colTot==null)colTot=k;j=k;}}}}
+      return{v,colTot};};
+    let sc=escanear(1e9);if(sc.colTot!=null)sc=escanear(sc.colTot);   // con la columna TOTAL conocida solo se lee el formulario: a la derecha el libro puede traer otras tablas (balance, terceros) con números que parecen casillas
+    const v=sc.v,colTot=sc.colTot;
     if(Object.keys(v).length<8||(v[130]==null&&v[136]==null))continue;
+    // algunos formularios no imprimen el número de las casillas de IVA (131, 132, 134): se leen por su rótulo (el valor va en la columna TOTAL, la última cifra de la fila)
+    if(colTot!=null)for(const r of rows){let l='';for(const x of r)if(typeof x==='string'&&x.trim()){l=norm(x);break;}if(!l)continue;
+      const u=typeof r[colTot]==='number'?r[colTot]:null;if(u==null)continue;   // el valor está en la columna TOTAL (a la derecha de la fila hay otras tablas del libro: no se toma «la última cifra»)
+      if(!(131 in v)&&/^a responsables del impuesto sobre las ventas/.test(l))v[131]=u;
+      else if(!(132 in v)&&/^practicadas por servicios a no residentes/.test(l))v[132]=u;
+      else if(!(134 in v)&&/^total retenciones iva/.test(l))v[134]=u;}
     return form350FromMap(v);
   }
   return{err:'No reconocí casillas del formulario 350 en el archivo.'};
@@ -2817,24 +2834,28 @@ function ruleAutorret(ctx){
   const desglose=AUTO_FILAS.filter(([k])=>def==='todas'||(def==='exonerados'?k==='EXONERADOS':k!=='EXONERADOS')).map(([k,tx])=>{const x=(ctx.auto||{})[k];const b=x?(+x.pjBase||0)+(+x.pnBase||0):0;return b?tx.replace(/ \(art.*$/,'')+' $'+fm(b):'';}).filter(Boolean).join(' · ');
   const difs=[{id:'F41',txt:'formulario − cuenta 41',v:F-B41}];
   if(D!=null)difs.unshift({id:'FD',txt:'formulario − DIAN',v:F-D},{id:'D41',txt:'DIAN − cuenta 41',v:D-B41});
-  const targets=difs.map(d=>{const mal=Math.abs(d.v)>tol;if(!mal)return Object.assign({},d,{ok:true,sel:[],resid:d.v});const s=mejorSubconjunto(cands,d.v,tol);return Object.assign({},d,{ok:false,sel:s.idx.map(i=>cands[i].cta),resid:s.resid,exacto:s.exacto,truncado:s.truncado});});
+  const X=D!=null?cruceFacturasEmitidas(ctx):null,exp=(X&&X.confiable)?X.exp:0,difX=(X&&X.confiable)?X.dif:[];   // facturas emitidas cuya base en la DIAN no coincide con lo contabilizado en la cuenta 41 (cruce factura por factura)
+  const ajuste=d=>d.id==='D41'?d.v-exp:d.id==='FD'?d.v+exp:d.v;   // lo que esas facturas explican se descuenta de las diferencias contra la DIAN
+  const targets=difs.map(d=>{const va=ajuste(d),porF=exp!==0&&d.id!=='F41'&&Math.abs(d.v)>tol;const mal=Math.abs(va)>tol;if(!mal)return Object.assign({},d,{ok:true,sel:[],resid:va,porF});const s=mejorSubconjunto(cands,va,tol);return Object.assign({},d,{ok:false,sel:s.idx.map(i=>cands[i].cta),resid:s.resid,exacto:s.exacto,truncado:s.truncado,porF});});
   const fmtSel=tg=>tg.sel.length?tg.sel.map(c=>c+' '+(cands.find(x=>x.cta===c)||{}).nom).join('; '):'ninguna cuenta';
   const rows=[{Concepto:'Ingresos del formulario: '+AUTO_DEF_TXT[def],Valor:Math.round(F),Detalle:desglose}];
   for(const k of orden)if(k!==def&&cv[k]!==cv[def])rows.push({Concepto:'Otra definición: '+AUTO_DEF_TXT[k],Valor:Math.round(cv[k]),Detalle:'Frente al movimiento de la cuenta 41: '+(Math.abs(cv[k]-B41)<=tol?'cruza':'diferencia de '+mS(cv[k]-B41))+' · solo informativa'});
   if(D!=null)rows.push({Concepto:'Facturas emitidas en la DIAN, sin IVA ni demás impuestos',Valor:Math.round(D),Detalle:nFa+' factura(s)'+(nNC?' y '+nNC+' nota(s) crédito':'')+' del período'});
   rows.push({Concepto:'Movimiento del período de la cuenta 41 (saldo final − saldo anterior)',Valor:Math.round(B41),Detalle:'Saldo final acumulado $'+fm(SF41)+(Math.abs(SF41-B41)>tol?' · saldo anterior $'+fm(SF41-B41):'')+' · '+(h41.length?h41.length+' cuenta(s): '+h41.map(a=>a.cta).join(', '):'cuenta 41')});
-  for(const tg of targets)rows.push({Concepto:'Diferencia '+tg.txt,Valor:Math.round(tg.v)||0,Detalle:tg.ok?'Cruza':'No cruza'});
+  if(exp!==0)rows.push({Concepto:'Facturas emitidas con diferencia contra la contabilidad (cuenta 41)',Valor:Math.round(exp),Detalle:difX.length+' documento(s): '+difX.slice(0,4).map(x=>(x.r.pref||'')+x.r.folio+' $'+fm(x.dif)+(x.obs?' ('+x.obs+')':'')).join('; ')+(difX.length>4?'…':'')+' · detalle en la revisión de facturas emitidas'});
+  for(const tg of targets)rows.push({Concepto:'Diferencia '+tg.txt,Valor:Math.round(tg.v)||0,Detalle:tg.ok?(tg.porF?'Cruza tras explicar $'+fm(Math.abs(exp))+' con facturas que no coinciden con la contabilidad':'Cruza'):'No cruza'});
   const malos=targets.filter(x=>!x.ok);
-  for(const tg of malos)rows.push({Concepto:'Cierre de «'+tg.txt+'» con partidas de la cuenta '+pref.join('/'),Valor:Math.round(tg.resid)||0,Detalle:tg.exacto?'Cruza exactamente con: '+fmtSel(tg):(tg.sel.length?'No cruza exactamente. Combinación más cercana (solo referencial): '+fmtSel(tg)+' · quedan $'+fm(Math.abs(tg.resid))+' sin explicar':'Ninguna combinación de partidas de la cuenta '+pref.join('/')+' explica la diferencia')+(tg.truncado?'. Se analizaron las 26 cuentas de mayor saldo.':'')});
+  for(const tg of malos)rows.push({Concepto:'Cierre de «'+tg.txt+'»'+(tg.porF?' (tras sumar o restar las facturas que no coinciden)':'')+' con partidas de la cuenta '+pref.join('/'),Valor:Math.round(tg.resid)||0,Detalle:tg.exacto?'Cruza exactamente con: '+fmtSel(tg):(tg.sel.length?'No cruza exactamente. Combinación más cercana (solo referencial): '+fmtSel(tg)+' · quedan $'+fm(Math.abs(tg.resid))+' sin explicar':'Ninguna combinación de partidas de la cuenta '+pref.join('/')+' explica la diferencia')+(tg.truncado?'. Se analizaron las 26 cuentas de mayor saldo.':'')});
   if(malos.length)for(const c of cands)rows.push({Concepto:'Cuenta '+c.cta+' '+c.nom,Valor:Math.round(c.v),Detalle:malos.filter(x=>x.exacto&&x.sel.includes(c.cta)).map(x=>'Cierra «'+x.txt+'»').join(' · ')});
   const cols=['Concepto','Valor','Detalle'];
   const notaDef=orden.length>1?' Ingresos tomados: '+AUTO_DEF_TXT[def]+(modo==='auto'?' (definición automática; puedes fijarla en el perfil)':'')+'.':'';
   const r=(est,txt)=>{const x=R('autorret',t,est,txt+notaDef,cols,rows);x.datos={F,D,B41,SF41,nFa,nNC,cands,targets,pref,def,h41:h41.map(a=>a.cta),p41:!!p41};return x;};
   const faltaD=D==null?' Carga el reporte de la DIAN para cruzar también las facturas emitidas.':'';
-  if(!malos.length)return r('ok','Los ingresos del formulario ($'+fm(F)+')'+(D!=null?', las facturas emitidas en la DIAN sin IVA ($'+fm(D)+')':'')+' y el movimiento del período de la cuenta 41 ($'+fm(B41)+') cruzan.'+faltaD);
-  if(malos.every(x=>x.exacto))return r('warn','Los ingresos no cruzan solo con la cuenta 41, pero cierran exactamente con partidas de la cuenta '+pref.join('/')+': '+malos.map(x=>x.txt+' → '+fmtSel(x)).join(' | ')+'. Confirma que esas partidas deban formar parte de la base de autorretención.'+faltaD);
+  const notaF=exp!==0?' De la diferencia con la DIAN, $'+fm(Math.abs(exp))+' se explican por '+difX.length+(difX.length===1?' factura':' facturas')+' emitida(s) cuya base en la DIAN no coincide con lo contabilizado en la cuenta 41 ('+difX.slice(0,3).map(x=>(x.r.pref||'')+x.r.folio+(x.obs?' · '+x.obs:'')).join('; ')+(difX.length>3?'…':'')+').':'';
+  if(!malos.length)return exp!==0?r('warn','Los ingresos del formulario ($'+fm(F)+') y el movimiento del período de la cuenta 41 ($'+fm(B41)+') cruzan, y las facturas emitidas en la DIAN ($'+fm(D)+') cruzan una vez explicadas las facturas que no coinciden con la contabilidad.'+notaF):r('ok','Los ingresos del formulario ($'+fm(F)+')'+(D!=null?', las facturas emitidas en la DIAN sin IVA ($'+fm(D)+')':'')+' y el movimiento del período de la cuenta 41 ($'+fm(B41)+') cruzan.'+faltaD);
+  if(malos.every(x=>x.exacto))return r('warn','Los ingresos no cruzan solo con la cuenta 41, pero cierran exactamente con partidas de la cuenta '+pref.join('/')+': '+malos.map(x=>x.txt+' → '+fmtSel(x)).join(' | ')+'. Confirma que esas partidas deban formar parte de la base de autorretención.'+notaF+faltaD);
   const x=malos.find(z=>!z.exacto);
-  return r('err','Los ingresos no cruzan: '+malos.map(z=>z.txt+' '+mS(z.v)).join(', ')+'. Ni con las cuentas '+pref.join('/')+' se cierra '+x.txt+': queda una diferencia de $'+fm(Math.abs(x.resid))+'.'+faltaD);
+  return r('err','Los ingresos no cruzan: '+malos.map(z=>z.txt+' '+mS(z.v)).join(', ')+'. Ni con las cuentas '+pref.join('/')+' se cierra '+x.txt+': queda una diferencia de $'+fm(Math.abs(x.resid))+'.'+notaF+faltaD);
 }
 function ruleOmitida(ctx){
   const t='Gastos sin retención en la fuente';
@@ -3632,6 +3653,7 @@ const VALIDACIONES_RTE=[
   ['basedian','Base de la DIAN (total sin IVA y demás impuestos) vs. base del reporte de retenciones',ruleBaseDian],
   ['cruceret','Retenciones del reporte contra la DIAN (recibidos y documentos soporte)',ruleCruceRet],
   ['autorret','Autorretención: ingresos del formulario vs. facturas emitidas en la DIAN vs. cuentas 41 y 42',ruleAutorret],
+  ['emitidas','Facturas emitidas en la DIAN vs. ingresos contabilizados (factura por factura)',ruleEmitidas],
   ['omitida','Gastos sin retención en la fuente',ruleOmitida],
   ['fijos','Gastos fijos del cliente',ruleFijos],
   ['listados','Retención a grandes contribuyentes, autorretenedores y ESAL',ruleListados]];
@@ -12489,6 +12511,44 @@ function ruleSalarios383(ctx){
   const x=R('salarios',t,est,resumen,cols,rows);x.todos=todos;x.sinModelo=sinModelo;x.hayLibros=!!L;return x;
 }
 
+/* ########## SECCIÓN 22 · Facturas emitidas: cruce factura por factura con la contabilidad ########## */
+/* Cada factura o nota crédito emitida de la DIAN se empareja con los asientos de ingresos (cuenta 41) de su comprobante: por el NÚMERO (factura 20043 ↔ comprobante F-006-…20043) o, en las notas crédito, por la
+   secuencia + número (folio C002640 ↔ comprobante J-002-…640), siempre con el mismo tercero. Se compara la base de la DIAN (sin IVA ni demás impuestos, con signo) con el neto de esos asientos (créditos − débitos).
+   Solo es confiable si se emparejan al menos la mitad de los documentos; si no, no se concluye nada por factura. */
+const _cerosIzq=s=>String(s==null?'':s).replace(/\D/g,'').replace(/^0+/,'');
+function _clavesComprobante(doc){
+  const p=String(doc||'').split(/[^0-9A-Za-z]+/).filter(Boolean);if(p.length<2)return[];const num=_cerosIzq(p[p.length-1]);if(!num)return[];
+  const ks=[num];if(p.length>=3){const sec=String(p[1]).replace(/\D/g,'');if(sec)ks.push(_cerosIzq(sec+num.padStart(3,'0')));}return ks;}
+function cruceFacturasEmitidas(ctx){
+  const emi=ctx.emi&&ctx.emi.rows,L=ctx.led&&ctx.led.rows;
+  if(!emi||!emi.length)return{na:'Falta el reporte de la DIAN con las facturas emitidas.'};
+  if(!L||!L.length||ctx.led.agregado)return{na:'Falta el movimiento contable con el detalle de los comprobantes para cruzar las facturas emitidas.'};
+  const ing=L.filter(r=>/^41/.test(String(r.cta||''))&&r.doc);
+  if(!ing.length)return{na:'El movimiento contable cargado no trae asientos de ingresos (cuenta 41) con comprobante.'};
+  const idx=new Map();
+  for(const l of ing){const ter=String(l.ter||'').replace(/\D/g,''),neto=(+l.cre||0)-(+l.deb||0);
+    for(const k of _clavesComprobante(l.doc)){let m=idx.get(k);if(!m)idx.set(k,m=new Map());const x=m.get(ter)||{neto:0,n:0};x.neto+=neto;x.n++;m.set(ter,x);}}
+  const tol=ctx.tol||1000,esNC=r=>/^nota de cr/i.test(r.tipo),hdr=((ctx.emi&&ctx.emi.hdr)||[]).map(_dpn),iObs=hdr.findIndex(x=>/^observacion/.test(x));
+  const items=emi.map(r=>{const ter=String(r.nitR||'').replace(/\D/g,''),base=(esNC(r)?-1:1)*Math.abs(dianBase(r));let e=null;
+    for(const k of [_cerosIzq(r.folio),_cerosIzq(String(r.pref||'')+String(r.folio||''))]){if(!k)continue;const m=idx.get(k);if(!m)continue;e=m.get(ter)||m.get('')||m.get('0')||null;if(e)break;}
+    const cont=e?e.neto:null,dif=e?base-cont:base;
+    return{r,base,cont,dif,estado:e?(Math.abs(dif)>tol?'dif':'ok'):'sin',obs:iObs>=0&&r.raw&&r.raw[iObs]!=null?String(r.raw[iObs]).trim():''};});
+  const emparejados=items.filter(x=>x.estado!=='sin').length,dif=items.filter(x=>x.estado!=='ok');
+  return{items,dif,exp:dif.reduce((s,x)=>s+x.dif,0),emparejados,total:items.length,confiable:emparejados>=Math.max(1,Math.ceil(items.length*0.5)),tol};
+}
+function ruleEmitidas(ctx){
+  const t='Facturas emitidas en la DIAN vs. ingresos contabilizados (factura por factura)';
+  if(soloAgregado(ctx))return NA('emitidas',t,MSG_AGREGADO);
+  const X=cruceFacturasEmitidas(ctx);if(X.na)return NA('emitidas',t,X.na);
+  const cols=['Tipo','Documento','Fecha','NIT','Tercero','Base en la DIAN','Contabilizado (cuenta 41)','Diferencia','Estado','Observación del cliente'];
+  const nNC=X.items.filter(x=>/^nota de cr/i.test(x.r.tipo)).length,nFa=X.total-nNC,desc=nFa+(nFa===1?' factura':' facturas')+(nNC?' y '+nNC+(nNC===1?' nota crédito':' notas crédito'):'');
+  if(!X.confiable)return R('emitidas',t,'warn','Solo pude emparejar '+X.emparejados+' de '+X.total+' documentos emitidos ('+desc+') con asientos de la cuenta 41 por su número y su tercero: no se puede cruzar factura por factura. Revisa que el movimiento traiga los comprobantes de venta con el número de la factura.',cols,[]);
+  const filas=X.dif.slice().sort((a,b)=>Math.abs(b.dif)-Math.abs(a.dif)).map(x=>({Tipo:String(x.r.tipo).replace(/ electr[oó]nica/i,''),Documento:(x.r.pref||'')+x.r.folio,Fecha:fechaISO(x.r.fecha)||String(x.r.fecha||''),NIT:x.r.nitR,Tercero:x.r.nomR,'Base en la DIAN':Math.round(x.base),'Contabilizado (cuenta 41)':x.cont==null?'':Math.round(x.cont),Diferencia:Math.round(x.dif),Estado:x.estado==='sin'?'Sin asiento de ingreso':'Valor distinto','Observación del cliente':x.obs}));
+  const x=R('emitidas',t,X.dif.length?(X.dif.some(z=>!z.obs)?'err':'warn'):'ok',
+    X.dif.length?'De '+X.total+' documentos emitidos ('+desc+'), '+(X.total-X.dif.length)+' cruzan con la cuenta 41 y '+X.dif.length+' no: diferencia total $'+fm(Math.abs(X.exp))+(X.dif.some(z=>z.estado==='sin')?' ('+X.dif.filter(z=>z.estado==='sin').length+' sin asiento de ingreso)':'')+'.'+(X.dif.every(z=>z.obs)?' Todas traen observación del cliente: confírmala.':X.dif.some(z=>z.obs)?' '+X.dif.filter(z=>z.obs).length+' traen observación del cliente.':''):'Los '+X.total+' documentos emitidos ('+desc+') cruzan con los asientos de la cuenta 41 (tolerancia $'+fm(X.tol)+').',cols,filas);
+  x.items=X.items;x.exp=X.exp;return x;
+}
+
 
 
 /* ÍNDICE · checklist — Actividades del checklist
@@ -12524,6 +12584,7 @@ const CHECK=[
  {id:'c8b',t:'La base de cada factura y documento soporte de la DIAN (total sin IVA y demás impuestos) coincide con la base del reporte de retenciones de contabilidad.',auto:'basedian',extra:true},
  {id:'c8d',t:'Cada retención del reporte de retenciones aparece en la DIAN: en las facturas recibidas o, si no está ahí, en los documentos soporte (la observación queda en la hoja Verificación).',auto:'cruceret',extra:true},
  {id:'c8c',t:'Si el formulario trae autorretenciones (casillas 59 a 76 y 113 a 128): los ingresos de esas casillas coinciden con las facturas emitidas en la DIAN sin IVA y con el saldo de la cuenta 41; las diferencias se explican con la cuenta 42.',auto:'autorret',extra:true},
+ {id:'c8e',t:'Validar factura por factura que las facturas y notas crédito emitidas en la DIAN estén contabilizadas como ingreso (cuenta 41) por el mismo valor y con el mismo tercero; las diferencias que el cliente documenta en su reporte quedan como observación',auto:'emitidas',extra:true},
  {id:'c9a',t:'La tarifa aplicada coincide con la de la cuenta.',auto:'tarifa',extra:true},
  {id:'c9b',t:'Las tarifas y las bases mínimas de las cuentas de retención corresponden a la tabla de retención en la fuente 2026.',auto:'tabla',extra:true},
  {id:'c9d',t:'Las tarifas son coherentes con el tipo de persona (jurídica o natural).',auto:'tipotarifa',extra:true},
@@ -14799,7 +14860,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega46';
+const APP_ENTREGA='fase4b-entrega48';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
