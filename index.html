@@ -1776,7 +1776,9 @@ function unirDian(partes){
     const propias=new Set();let nuevas=0,rep=0;
     for(const r of p.r.rows){const k=clave(r);
       if(i>0&&vistas.has(k)){rep++;continue;}   // solo se compara contra lo de los archivos anteriores
-      propias.add(k);rows.push(mapa?Object.assign({},r,{raw:mapa.map(j=>j>=0&&r.raw?r.raw[j]:'')}):r);nuevas++;}
+      propias.add(k);const fila=mapa?Object.assign({},r,{raw:mapa.map(j=>j>=0&&r.raw?r.raw[j]:'')}):Object.assign({},r);
+      Object.defineProperties(fila,{hdrP:{value:hdr,enumerable:false,writable:true,configurable:true},raw0:{value:r.raw,enumerable:false,writable:true,configurable:true}});   // hdrP/raw0 (no enumerables: no cambian cómo se ven las filas): el encabezado y la fila tal como venían en su propio reporte; splitDian los usa cuando una hoja sale de un solo reporte
+      rows.push(fila);nuevas++;}
     propias.forEach(k=>vistas.add(k));repetidas+=rep;archivos.push({nombre:p.nombre,filas:p.r.rows.length,nuevas,repetidas:rep});
   });
   return{rows,hdr:base,archivos,repetidas,colsDistintas};
@@ -3792,10 +3794,13 @@ function splitDian(parsed,period,nit){
   const isDS=r=>/documento soporte/i.test(r.tipo);
   const nb=nit?nitBase(nit):'',grupoDe=r=>r.grupo||(nb?(r.nitE===nb?'Emitido':r.nitR===nb?'Recibido':''):'');   // si un archivo no trae la columna «Grupo», se deduce del NIT del cliente: emisor = emitido, receptor = recibido
   const emit=r=>/emitid/i.test(grupoDe(r));
+  /* Cada hoja del Excel (recibidos, documentos soporte, emitidas) lleva el encabezado de SU reporte: antes, con varios reportes unidos, todas usaban el de la primera hoja y, p. ej., las columnas «NIT Emisor» de los recibidos quedaban vacías bajo «NIT Receptor».
+     Solo si los documentos de una misma hoja vienen de reportes con columnas distintas se queda el encabezado unido (las filas ya vienen acomodadas por nombre). */
+  const propio=rs=>{if(!rs.length||!rs[0].hdrP)return{rows:rs,hdr:parsed.hdr};const k=r=>r.hdrP?r.hdrP.join('\u0001'):null,k0=k(rs[0]);if(!rs.every(r=>k(r)===k0))return{rows:rs,hdr:parsed.hdr};return{rows:rs.map(r=>r.raw0?Object.assign({},r,{raw:r.raw0}):r),hdr:rs[0].hdrP};};
   return{
-    rec:{rows:rows.filter(r=>!emit(r)&&!isDS(r)&&!/nomina|application/i.test(r.tipo)),hdr:parsed.hdr},
-    ds:{rows:parsed.rows.filter(r=>isDS(r)&&emit(r)),hdr:parsed.hdr},
-    emi:{rows:rows.filter(r=>emit(r)&&/^(factura|nota de (cr[eé]dito|d[eé]bito))/i.test(r.tipo)&&/^aprobad/i.test(r.estado||'')),hdr:parsed.hdr},
+    rec:propio(rows.filter(r=>!emit(r)&&!isDS(r)&&!/nomina|application/i.test(r.tipo))),
+    ds:propio(parsed.rows.filter(r=>isDS(r)&&emit(r))),
+    emi:propio(rows.filter(r=>emit(r)&&/^(factura|nota de (cr[eé]dito|d[eé]bito))/i.test(r.tipo)&&/^aprobad/i.test(r.estado||''))),
     fuera:parsed.rows.length-rows.length,total:parsed.rows.length,sinFecha:sinFecha.length,ejemploSinFecha:sinFecha.length?String(sinFecha[0].fecha):'',mesDia};
 }
 
@@ -14860,7 +14865,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega48';
+const APP_ENTREGA='fase4b-entrega49';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
