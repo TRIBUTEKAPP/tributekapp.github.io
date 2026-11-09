@@ -12,7 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- CUENTAS Y FIRMAS (opcional). Para activar el ingreso con cuentas, escribe aquí la dirección y la clave PÚBLICA («anon») de tu proyecto de Supabase (ver docs/cuentas/LEEME.md).
      Con estos datos vacíos, Tributek funciona como siempre: clientes en este navegador, sin ingreso. NUNCA pongas aquí la clave «service_role». -->
-<script>window.TRIBUTEK_CONFIG=window.TRIBUTEK_CONFIG||{supabaseUrl:'https://cfnufabraxsefszftemw.supabase.co',supabaseAnonKey:'sb_publishable_ciowmf4-ZDBTw8wPJ9bwOg_UFEEDYNd',politicaUrl:''};</script>
+<script>window.TRIBUTEK_CONFIG=window.TRIBUTEK_CONFIG||{supabaseUrl:'',supabaseAnonKey:'',politicaUrl:''};</script>
 <style>
 /* ==========================================================
    Revisión de impuestos — Tema visual v3 (identidad del logo: blanco, azul marino y rojo vino)
@@ -544,6 +544,10 @@ body.gate-activo>*:not(#gate):not(#toast):not(script):not(style){visibility:hidd
 
 .gate .gate-invita{background:var(--soft);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:10px 12px;margin:10px 0;font-size:13.5px;line-height:1.5;color:var(--ink)}
 .gate .f-in input[readonly]{background:var(--soft);color:var(--muted);cursor:not-allowed}
+.dlg-informe{max-width:760px;width:100%;max-height:88vh;overflow:auto;text-align:left}
+.dlg-informe label{display:block;font-weight:600;margin:10px 0 4px}
+.dlg-informe input[type=text],.dlg-informe input[type=date],.dlg-informe textarea{width:100%;box-sizing:border-box}
+.dlg-informe .hall{border:1px solid var(--line,#d9dee7);border-radius:8px;padding:8px 10px;margin:8px 0}
 
 </style>
 </head>
@@ -1387,6 +1391,7 @@ function msg(codigo, vars) {
    21 · Depuración de salarios (art. 383 del E.T., procedimiento 1)
    22 · Facturas emitidas: cruce factura por factura con la contabilidad
    23 · Informe de compras con retenciones (SAP Business One)
+   24 · Informe al cliente (carta de revisión de impuestos)
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -12619,6 +12624,39 @@ function parseInformeComprasRet(rows){
   return{rows:out,hasBase:out.some(x=>x.base>0),formato,resumen,completo:hi>=0,totalInforme:granTotal,empresa,hasta,sinCuenta,avisos};
 }
 
+/* ########## SECCIÓN 24 · Informe al cliente (carta de revisión de impuestos) ########## */
+/* Arma, con lo que la app ya sabe (cliente, vencimientos, períodos, documentos recibidos, hallazgos de las revisiones y valores por pagar), el contenido de la carta «Revisión de impuestos» que se entrega al cliente.
+   Es solo contenido: construirDocx (export.js) lo pasa a Word, sin logos ni datos de ninguna firma. */
+const _MES_L=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],_MES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+function fechaLargaES(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));return m?(+m[3])+' de '+_MES_L[+m[2]-1]+' del '+m[1]:'';}   // «28 de septiembre del 2026»
+function periodoCortoES(p){const s=String(p||'');let m=/^(\d{4})-(\d{2})$/.exec(s);if(m)return _MES_C[+m[2]-1]+' '+m[1];m=/^(\d{4})-B([1-6])$/.exec(s);if(m){const n=+m[2];return _MES_C[2*n-2]+' - '+_MES_C[2*n-1]+' '+m[1];}return /^\d{4}$/.test(s)?s:'N/A';}
+function nitConPuntos(nit){const p=partirNit(nit),b=p&&p.base?String(p.base):'';if(!b)return String(nit||'').trim();return b.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+(p.dv!=null&&p.dv!==''?'-'+p.dv:'');}
+const ALCANCE_INFORME='La información suministrada en las declaraciones presentadas se cruza con los libros auxiliares, balance de comprobación del periodo, revisión de soportes digitales aleatorios suministrados por la administración bajo NIIF.';
+const SIN_HALLAZGOS_INFORME='Se efectúa la revisión del impuesto antes mencionado, el cual fue verificado con auxiliares y soportes aleatorios entregados por la administración.';
+/* Hallazgos de una lista de resultados: los que no cuadran (error) o merecen confirmación (advertencia); con una tabla corta de las filas más importantes */
+function hallazgosInforme(results,maxFilas){
+  const mf=maxFilas||8;
+  return(results||[]).filter(r=>r&&(r.estado==='err'||r.estado==='warn')).map(r=>{
+    const cols=(r.cols||[]).slice(0,6),filas=(r.rows||[]).slice(0,mf).map(f=>cols.map(c=>{const v=f[c];return typeof v==='number'?fm(v):(v==null?'':String(v));}));
+    return{id:r.id,titulo:r.titulo,estado:r.estado,texto:String(r.resumen||'').trim(),tabla:filas.length?{cols,rows:filas,total:(r.rows||[]).length}:null};});
+}
+/* o: {ciudad, fecha (ISO), cliente:{razon,nit}, atn, vencimientos:[{texto,fecha}], fechaRevision (ISO), impuestos:[{nombre,periodicidad,periodo,revisado}], docsExcel:[{doc,estado}], docsOtros:[{doc,estado}],
+       secciones:[{titulo,revisado,hallazgos:[{texto,tabla,respuesta}]}], porPagar:[{concepto,valor}]} */
+function armarInforme(o){
+  const t=v=>String(v==null?'':v).trim();
+  return{
+    fechaLinea:(t(o.ciudad)||'Bogotá D.C.')+', '+fechaLargaES(o.fecha),
+    razon:t(o.cliente&&o.cliente.razon).toUpperCase(),nit:'Nit. '+nitConPuntos(o.cliente&&o.cliente.nit),atn:t(o.atn)?'Atn. '+t(o.atn):'',
+    asunto:'Revisión de impuestos',
+    vencimientos:(o.vencimientos||[]).filter(v=>v&&v.fecha).map(v=>t(v.texto)+': '+fechaLargaES(v.fecha)),
+    fechaRevision:fechaLargaES(o.fechaRevision),
+    impuestos:(o.impuestos||[]).map(i=>({nombre:t(i.nombre),periodicidad:t(i.periodicidad)||'N/A',periodo:i.revisado?(t(i.periodo)||'N/A'):'N/A',revisado:!!i.revisado})),
+    alcance:ALCANCE_INFORME,docsExcel:(o.docsExcel||[]).map(d=>({doc:t(d.doc),estado:t(d.estado)||'Pendiente'})),docsOtros:(o.docsOtros||[]).map(d=>({doc:t(d.doc),estado:t(d.estado)||'Pendiente'})),
+    secciones:(o.secciones||[]).filter(s=>s&&s.revisado).map((s,i)=>{const h=(s.hallazgos||[]).map(x=>({texto:t(x.texto),tabla:x.tabla||null,respuesta:t(x.respuesta)}));
+      return{numero:String(i+1),titulo:t(s.titulo),items:h.length?h:[{texto:SIN_HALLAZGOS_INFORME,tabla:null,respuesta:''}],conHallazgos:h.length>0};}),
+    porPagar:(o.porPagar||[]).filter(p=>p&&p.valor!=null&&p.valor!==''&&!isNaN(+p.valor)).map(p=>({concepto:t(p.concepto),texto:t(p.concepto)+' $ '+Math.round(+p.valor).toLocaleString('es-CO')}))};
+}
+
 
 
 /* ÍNDICE · checklist — Actividades del checklist
@@ -13017,6 +13055,63 @@ function xArt383(wb,d){
   for(const k of ['E','K','L','P','S','T','W','X','AA','AB','AD']){const c=ws.getCell(k+r);c.value={formula:`SUM(${k}${r0}:${k}${r1})`};c.numFmt=XMONEY;c.font=xf({bold:true});c.border={top:THIN,bottom:THIN};}
   if(d.salSin&&d.salSin.length){r+=2;ws.getCell('B'+r).value='Con retención en libros y sin modelo de depuración';ws.getCell('B'+r).font=xf({bold:true,color:{argb:'FF9C0006'}});r++;
     for(const s of d.salSin){ws.getCell('B'+r).value=s.nombre||'(sin nombre)';ws.getCell('C'+r).value=s.cc;ws.getCell('AD'+r).value=s.lib;ws.getCell('AD'+r).numFmt=XMONEY;ws.getCell('AF'+r).value='Revisar';ws.getCell('AF'+r).font=xf({bold:true,color:{argb:'FF9C0006'}});r++;}}
+}
+/* ---------- Informe al cliente en Word (.docx) ---------- */
+/* OOXML escrito a mano y ZIP sin comprimir (un Word de pocas páginas pesa poco): sin librerías ni red. Plantilla: carta de «Revisión de impuestos» (Letter, márgenes de 3 cm a los lados y 2,5 cm arriba y abajo,
+   Calibri 11, tabla de impuestos con encabezado azul, tablas de documentos con borde negro, hallazgos numerados, viñetas ✓ en los valores por pagar). Sin encabezado ni pie: no lleva logos ni datos de ninguna firma. */
+const _XE=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
+const _R=(t,o)=>{o=o||{};const pr=(o.font?`<w:rFonts w:ascii="${o.font}" w:hAnsi="${o.font}" w:eastAsia="${o.font}" w:cs="${o.font}"/>`:'')+(o.b?'<w:b/><w:bCs/>':'')+(o.i?'<w:i/><w:iCs/>':'')+(o.color?`<w:color w:val="${o.color}"/>`:'')+(o.sz?`<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>`:'');
+  return`<w:r>${pr?`<w:rPr>${pr}</w:rPr>`:''}<w:t xml:space="preserve">${_XE(t)}</w:t></w:r>`;};
+const _TAB='<w:r><w:tab/></w:r>';
+const _P=(runs,o)=>{o=o||{};const pp=(o.keep?'<w:keepNext/>':'')+(o.num?`<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${o.num}"/></w:numPr>`:'')+(o.tabs?`<w:tabs>${o.tabs.map(t=>`<w:tab w:val="left" w:pos="${t}"/>`).join('')}</w:tabs>`:'')
+  +(o.antes!=null||o.despues!=null?`<w:spacing${o.antes!=null?` w:before="${o.antes}"`:''}${o.despues!=null?` w:after="${o.despues}"`:''}/>`:'')+(o.izq!=null||o.colgante!=null?`<w:ind w:left="${o.izq||0}"${o.colgante!=null?` w:hanging="${o.colgante}"`:''}/>`:'')+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
+  return`<w:p>${pp?`<w:pPr>${pp}</w:pPr>`:''}${Array.isArray(runs)?runs.join(''):runs}</w:p>`;};
+const _BORDE=(c,sz)=>['top','left','bottom','right','insideH','insideV'].map(l=>`<w:${l} w:val="single" w:sz="${sz||4}" w:space="0" w:color="${c}"/>`).join('');
+function _TABLA(anchos,filas,o){o=o||{};const W=anchos.reduce((a,b)=>a+b,0);
+  const tr=filas.map((f,i)=>{const enc=o.encabezado&&i===0;return`<w:tr><w:trPr><w:cantSplit/>${enc?'<w:tblHeader/>':''}</w:trPr>${f.map((c,j)=>{const cel=typeof c==='object'&&c!==null&&!Array.isArray(c)?c:{t:c};
+      const relleno=enc&&o.relleno?`<w:shd w:val="clear" w:color="auto" w:fill="${o.relleno}"/>`:'';const jc=cel.jc||(enc?'center':(o.jc&&o.jc[j])||'left');
+      const run=_R(cel.t,{b:enc||cel.b||(o.negrita&&o.negrita[j]),color:enc&&o.relleno?(o.colorEnc||'FFFFFF'):cel.color,font:cel.font,sz:o.sz});
+      return`<w:tc><w:tcPr><w:tcW w:w="${anchos[j]}" w:type="dxa"/>${relleno}<w:vAlign w:val="center"/></w:tcPr>${_P(run,{despues:0,jc,keep:o.mantener})}</w:tc>`;}).join('')}</w:tr>`;}).join('');
+  return`<w:tbl><w:tblPr><w:tblW w:w="${W}" w:type="dxa"/>${o.centrada?'<w:jc w:val="center"/>':''}<w:tblBorders>${_BORDE(o.borde||'000000',4)}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="28" w:type="dxa"/><w:left w:w="85" w:type="dxa"/><w:bottom w:w="28" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${anchos.map(a=>`<w:gridCol w:w="${a}"/>`).join('')}</w:tblGrid>${tr}</w:tbl>`;}
+function _crc32(b){let c,t=_crc32.t;if(!t){t=_crc32.t=[];for(let n=0;n<256;n++){c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}}c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=t[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;}
+function zipSinComprimir(entradas){   // entradas: [{nombre,texto}] → Uint8Array de un ZIP válido (método «almacenado»)
+  const te=new TextEncoder(),loc=[],cen=[];let pos=0;
+  for(const e of entradas){const n=te.encode(e.nombre),d=te.encode(e.texto),crc=_crc32(d);
+    const h=new Uint8Array(30+n.length),v=new DataView(h.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x0800,true);v.setUint16(10,0,true);v.setUint16(12,0x21,true);v.setUint32(14,crc,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,n.length,true);h.set(n,30);loc.push(h,d);
+    const c=new Uint8Array(46+n.length),w=new DataView(c.buffer);w.setUint32(0,0x02014b50,true);w.setUint16(4,20,true);w.setUint16(6,20,true);w.setUint16(8,0x0800,true);w.setUint16(12,0,true);w.setUint16(14,0x21,true);w.setUint32(16,crc,true);w.setUint32(20,d.length,true);w.setUint32(24,d.length,true);w.setUint16(28,n.length,true);w.setUint32(42,pos,true);c.set(n,46);cen.push(c);pos+=h.length+d.length;}
+  const cdLen=cen.reduce((s,a)=>s+a.length,0),fin=new Uint8Array(22),f=new DataView(fin.buffer);f.setUint32(0,0x06054b50,true);f.setUint16(8,entradas.length,true);f.setUint16(10,entradas.length,true);f.setUint32(12,cdLen,true);f.setUint32(16,pos,true);
+  const partes=[...loc,...cen,fin],out=new Uint8Array(partes.reduce((s,a)=>s+a.length,0));let p=0;for(const a of partes){out.set(a,p);p+=a.length;}return out;}
+function construirDocx(inf){
+  const AZUL='5B9BD5',ANCHO=8838,cuerpo=[];
+  const eti=(t)=>_P(_R(t,{b:true}),{keep:true,antes:120});
+  cuerpo.push(_P(_R(inf.fechaLinea),{jc:'right',despues:240}));
+  cuerpo.push(_P(_R('Señores:'),{despues:0}),_P(_R(inf.razon,{b:true}),{despues:0}),_P(_R(inf.nit,{b:true}),{despues:0}));if(inf.atn)cuerpo.push(_P(_R(inf.atn),{despues:0}));
+  cuerpo.push(_P('',{despues:120}),_P(_R('Asunto: '+inf.asunto,{b:true}),{jc:'right',despues:240}));
+  if(inf.vencimientos.length){cuerpo.push(eti('Vencimientos Impuestos:'));inf.vencimientos.forEach((v,i)=>cuerpo.push(_P(_R(v),{despues:i===inf.vencimientos.length-1?160:0})));}
+  if(inf.fechaRevision)cuerpo.push(_P([_R('Fecha de revisión: ',{b:true}),_R(inf.fechaRevision)],{antes:120}));
+  if(inf.impuestos.length){const filas=[['','Impuesto','Periodicidad','Periodo de Revisión'].map((t,i)=>i?t:'')].concat(inf.impuestos.map((i,k)=>[{t:i.revisado?'☒':'☐',font:'Segoe UI Symbol',jc:'center'},{t:(k+1)+'.  '+i.nombre,jc:'left'},{t:i.periodicidad,jc:'center'},{t:i.periodo,jc:'center'}]));
+    cuerpo.push(_TABLA([520,3400,2300,2618],filas,{encabezado:true,relleno:AZUL,borde:AZUL}));cuerpo.push(_P('',{despues:60}));}
+  cuerpo.push(_P(_R(inf.alcance),{jc:'both',antes:120}));
+  const docs=(titulo,l)=>{if(!l.length)return;cuerpo.push(eti(titulo));cuerpo.push(_TABLA([6300,2538],l.map(d=>[d.doc,{t:d.estado,b:true}]),{}));cuerpo.push(_P('',{despues:60}));};
+  docs('Documentos requeridos en Excel:',inf.docsExcel);docs('Otros Documentos requeridos:',inf.docsOtros);
+  for(const s of inf.secciones){
+    cuerpo.push(_P([_R(s.numero+'.',{b:true}),_TAB,_R(s.titulo,{b:true})],{keep:true,antes:240,despues:120,tabs:[567],izq:567,colgante:567}));
+    s.items.forEach((it,k)=>{
+      cuerpo.push(_P([_R(s.numero+'.'+(k+1),{b:true}),_TAB,_R(it.texto)],{antes:60,despues:120,tabs:[709],izq:709,colgante:709,jc:'both'}));
+      if(it.tabla){const n=it.tabla.cols.length,rest=ANCHO-2*0,base=Math.floor(rest/n),anchos=it.tabla.cols.map((c,i)=>i===0?rest-base*(n-1):base);
+        cuerpo.push(_TABLA(anchos,[it.tabla.cols].concat(it.tabla.rows),{encabezado:true,relleno:'D9E2F3',colorEnc:'1F3864',borde:'8EAADB',sz:18,centrada:true,jc:it.tabla.cols.map((c,i)=>it.tabla.rows.length&&it.tabla.rows.every(f=>f[i]===''||/^-?[\d.,]+\s*%?$/.test(String(f[i])))?'right':'left')}));
+        if(it.tabla.total>it.tabla.rows.length)cuerpo.push(_P(_R('Se muestran '+it.tabla.rows.length+' de '+it.tabla.total+' filas; el detalle completo está en el papel de trabajo.',{i:true,sz:18,color:'595959'}),{antes:40,despues:120}));else cuerpo.push(_P('',{despues:60}));}
+      if(it.respuesta)cuerpo.push(_P([_R('La administración informa: ',{b:true}),_R('“'+it.respuesta+'”')],{despues:120,jc:'both',izq:709}));});}
+  if(inf.porPagar.length){cuerpo.push(_P(_R('Valor por pagar:',{b:true}),{keep:true,antes:240,despues:120}));inf.porPagar.forEach(p=>cuerpo.push(_P(_R(p.texto,{b:true}),{num:1,despues:120})));}
+  const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',cab='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const documento=`${cab}<w:document ${NS}><w:body>${cuerpo.join('')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/></w:sectPr></w:body></w:document>`;
+  const estilos=`${cab}<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="es-CO" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
+  const numeracion=`${cab}<w:numbering ${NS}><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="✓"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol" w:cs="Segoe UI Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`;
+  const tipos=`${cab}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
+  const rels=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
+  const relsDoc=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/></Relationships>`;
+  const nucleo=`${cab}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${_XE(inf.asunto)} · ${_XE(inf.razon)}</dc:title></cp:coreProperties>`;
+  return zipSinComprimir([{nombre:'[Content_Types].xml',texto:tipos},{nombre:'_rels/.rels',texto:rels},{nombre:'word/document.xml',texto:documento},{nombre:'word/_rels/document.xml.rels',texto:relsDoc},{nombre:'word/styles.xml',texto:estilos},{nombre:'word/numbering.xml',texto:numeracion},{nombre:'docProps/core.xml',texto:nucleo}]);
 }
 /* ---------- Balance ---------- */
 function balanceRows(d){
@@ -14336,7 +14431,7 @@ function render(){
    ${controlPeriodo(c)}</div>
    <div class="tabs imps" role="tablist" aria-label="Impuesto">${IMPS.map(i=>`<button role="tab" data-a="imp" data-t="${i}" aria-selected="${S.imp===i}">${IMP_NOMBRE[i]}</button>`).join('')}</div>
    <div class="tabs" role="tablist">${tabs.map(t=>`<button role="tab" data-a="tab" data-t="${t[0]}" aria-selected="${S.tab===t[0]}">${t[1]}</button>`).join('')}</div>
-   ${(S.tab==='archivos'||S.tab==='cliente')&&(S.imp==='reteica'?S.rica.results:S.imp==='ica'?S.ica.results:S.results)?`<div class="row dlbar"><span class="hint">Ya hay una revisión ejecutada para este período.</span><button class="btn ghost" data-a="dl">Descargar papel de trabajo (.xlsx)</button>${carpetaLinea()}</div>`:''}
+   ${(S.tab==='archivos'||S.tab==='cliente')&&(S.imp==='reteica'?S.rica.results:S.imp==='ica'?S.ica.results:S.results)?`<div class="row dlbar"><span class="hint">Ya hay una revisión ejecutada para este período.</span><button class="btn ghost" data-a="dl">Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="informe" title="La carta de revisión de impuestos para el cliente, en Word">Generar informe (Word)</button>${carpetaLinea()}</div>`:''}
    ${S.tab==='cliente'?tabCliente(c):((S.imp==='reteica'||S.imp==='ica')&&!S.per[S.imp])?tabChecklist(c):S.tab==='archivos'?(S.imp==='reteica'?tabArchivosR(c):S.imp==='ica'?tabArchivosI(c):tabArchivos(c)):S.tab==='validacion'?tabValidacion(c):tabChecklist(c)}`;
 }
 /* ########## SECCIÓN 7 · Tablero de clientes (pantalla de inicio) ########## */
@@ -14659,7 +14754,7 @@ function tabValidacion(c){
     const falta=!rica&&!ica?faltaCargar():'',avisoFalta=sinD.length&&falta?`<div class="panel"><p class="hint"><b>${esc(mt('RES-FALTA-001',{lista:falta}))}</b></p></div>`:'';
     const plegadas=sinD.length?`<details class="faltan"><summary><b>${sinD.length} revisiones sin datos</b> <span class="hint">· se activan al cargar más archivos; despliega para ver qué necesita cada una</span></summary>${sinD.map(resBlock).join('')}</details>`:'';
     return `<div class="summary"><div><strong>${n('err')}</strong><span>con error</span></div><div><strong>${n('warn')}</strong><span>por revisar</span></div><div><strong>${n('ok')}</strong><span>sin hallazgos</span></div><div><strong>${n('na')}</strong><span>sin datos para validar</span></div>${n('fallo')?`<div><strong>${n('fallo')}</strong><span>no se pudieron completar</span></div>`:''}</div>${notaNube}${avisoFalta}${verR.map(resBlock).join('')}${plegadas}
-     <div class="row" style="margin-top:14px"><button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="run" ${S.corriendo?'disabled':''}>${S.corriendo?'Revisando…':'Volver a ejecutar'}</button>${carpetaLinea()}</div>`;}
+     <div class="row" style="margin-top:14px"><button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="informe" title="La carta de revisión de impuestos para el cliente, en Word">Generar informe (Word)</button><button class="btn ghost" data-a="run" ${S.corriendo?'disabled':''}>${S.corriendo?'Revisando…':'Volver a ejecutar'}</button>${carpetaLinea()}</div>`;}
   if(p.summary)return `<div class="panel"><h3>Última revisión guardada</h3><p class="hint">Ejecutada el ${esc(new Date(p.ranAt).toLocaleString('es-CO'))}. Es solo el resumen: vuelve a cargar los archivos para ver el detalle.</p>${p.summary.map(r=>`<p><span class="chip ${r.estado}">${ST[r.estado]}</span> <b>${esc(r.titulo)}</b><br><span class="hint">${esc(r.resumen)}</span></p>`).join('')}</div>`;
   return ica?`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para este período de ICA</h2><p>Carga el balance, digita la declaración y ejecuta la validación en la pestaña de archivos.</p><button class="btn" data-a="tab" data-t="archivos">Ir a los archivos</button></div>`:rica?`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para el ${b.n}.º bimestre de ${b.anio}</h2><p>Carga el balance y el borrador del formulario 131 en la pestaña Archivos del bimestre y ejecuta la validación.</p><button class="btn" data-a="tab" data-t="archivos">Ir a Archivos del bimestre</button></div>`
    :`<div class="empty" style="margin-top:10px"><h2>Aún no hay validación para ${esc(S.period)}</h2><p>Carga el balance y el borrador del 350 en la pestaña Archivos del mes y ejecuta la validación.</p><button class="btn" data-a="tab" data-t="archivos">Ir a Archivos del mes</button></div>`;
@@ -14941,7 +15036,7 @@ function tabChecklist(c){
   let oblig='';
   if(!ret){const per=periodosActual(c).find(x=>x.id===S.per[imp]);const ch=per?chipVence(per.fecha):null;
     oblig=`<div class="panel"><h3>${esc(IMP_NOMBRE[imp])} · ${esc(per?per.txt:'')}</h3><p class="hint">${per?'Vence el '+esc(fmtFecha(per.fecha))+' <span class="chip '+ch.k+'">'+esc(ch.t)+'</span> · ':''}Calendario: ${imp==='iva'?'DIAN (según el último dígito del NIT)':'Secretaría de Hacienda de Bogotá'}. ${imp==='reteica'||imp==='ica'?'Carga los archivos del período y ejecuta la validación: las actividades con cruce automático se llenan solas.':'Las actividades de este impuesto son un borrador editable por la firma y todavía no tienen cruces automáticos: se marcan y comentan a mano.'}</p></div>`;}
-  const hayRes=ret?S.results:imp==='ica'?S.ica.results:S.rica.results;const dl=(conVal?`<button class="btn" data-a="dl" ${hayRes?'':'disabled'}>Descargar papel de trabajo (.xlsx)</button>${hayRes?'':'<span class="hint">Ejecuta la validación para generar el papel de trabajo.</span>'}`:'<button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button>')+carpetaLinea();
+  const hayRes=ret?S.results:imp==='ica'?S.ica.results:S.rica.results;const dl=(conVal?`<button class="btn" data-a="dl" ${hayRes?'':'disabled'}>Descargar papel de trabajo (.xlsx)</button><button class="btn ghost" data-a="informe" ${hayRes?'':'disabled'} title="La carta de revisión de impuestos para el cliente, en Word">Generar informe (Word)</button>${hayRes?'':'<span class="hint">Ejecuta la validación para generar el papel de trabajo.</span>'}`:'<button class="btn" data-a="dl">Descargar papel de trabajo (.xlsx)</button>'+(hayRes?'<button class="btn ghost" data-a="informe" title="La carta de revisión de impuestos para el cliente, en Word">Generar informe (Word)</button>':''))+carpetaLinea();
   return `${panelCierre(c)}${oblig}<div class="panel"><h3>Datos de la visita</h3><div class="grid"><div class="f"><label for="mv">Fecha de visita</label><input id="mv" type="date" data-c="meta" data-m="visita" value="${esc(p.meta.visita)}"></div><div class="f"><label for="mc">Fecha de corte <span class="hint">(hasta cuándo están cerrados los libros que revisas)</span></label><input id="mc" type="date" data-c="meta" data-m="corte" value="${esc(p.meta.corte)}"></div></div></div>
   <div class="panel"><h3>Checklist de revisión${conVal?'':' · borrador'}</h3><p class="hint">${conVal?'Las filas automáticas se llenan al ejecutar la validación. Tú marcas el resultado final y dejas comentarios.':'Marca el resultado de cada actividad y deja comentarios. Los cambios se guardan solos.'}</p><div class="scroll ck"><table><thead><tr><th>Actividad</th><th>Resultado automático</th><th>Revisado</th><th>Comentarios</th></tr></thead><tbody>${rows}</tbody></table></div></div>
   <div class="row">${dl}</div>`;
@@ -14950,7 +15045,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega51';
+const APP_ENTREGA='fase4b-entrega52';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -15037,6 +15132,49 @@ async function downloadGenerico(){
     const wb=buildPapelGenerico(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
     await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel de este impuesto.');}
+}
+/* ########## Informe al cliente (Word) ########## */
+/* Botón «Generar informe (Word)»: la carta de «Revisión de impuestos» con lo que la app ya sabe de la revisión ejecutada. Una ventana pide la atención, las fechas, qué hallazgos se incluyen (con la respuesta de la administración) y los valores por pagar. Sin logos de ninguna firma. */
+const INF_IMPS=[['retefuente','Retención en la fuente'],['reteica','Retención de ICA'],['ica','ICA']];
+const resultadosImp=imp=>imp==='retefuente'?S.results:imp==='reteica'?(S.rica&&S.rica.results):(S.ica&&S.ica.results);
+const periodoImp=imp=>imp==='retefuente'?S.period:((S.per&&S.per[imp])||'');
+function porPagarImp(imp){let v=null;try{if(imp==='retefuente'&&hasForm())v=total136()+(S.ex&&S.ex.c137||0);else if(imp==='reteica')v=S.rica&&S.rica.form&&S.rica.form.casillas&&S.rica.form.casillas.TP;else if(imp==='ica')v=S.ica&&S.ica.form&&S.ica.form.totalPagar;}catch(e){}return v==null||isNaN(+v)?'':Math.round(+v);}
+function datosInforme(){
+  const c=cur(),obs=obligacionesCliente(c,allCals()),loaded=k=>!!(S.data[k]&&S.data[k].parsed);
+  const secs=INF_IMPS.map(([imp,titulo])=>{const res=resultadosImp(imp);return{imp,titulo,revisado:!!res,periodo:periodoImp(imp),hallazgos:res?hallazgosInforme(res):[],venc:((obs.find(o=>o.imp===imp&&o.id===periodoImp(imp)))||{}).fecha||'',valor:res?porPagarImp(imp):''};}).filter(s=>s.revisado);
+  const ret=secs.find(s=>s.imp==='retefuente'),rica=secs.find(s=>s.imp==='reteica'),ica=secs.find(s=>s.imp==='ica'),mun=String(c.municipio||'Bogotá D.C.').replace(/\s*D\.C\.?$/,'');
+  const impuestos=[{nombre:'Retención en la Fuente',periodicidad:'Mensual',periodo:ret?periodoCortoES(ret.periodo):'',revisado:!!ret},{nombre:'IVA',periodicidad:c.iva==='Sí'?(c.periodicidad||'N/A'):'N/A',periodo:'',revisado:false},
+    {nombre:'ICA',periodicidad:c.icaRegimen||'N/A',periodo:ica?periodoCortoES(ica.periodo):'',revisado:!!ica},{nombre:'Retención ICA '+mun,periodicidad:c.agenteReteICA==='Sí'?'Bimestral':'N/A',periodo:rica?periodoCortoES(rica.periodo):'',revisado:!!rica}];
+  const ok=b=>b?'Ok':'Pendiente';
+  const docsExcel=ret?[['Auxiliar de la cuenta correspondiente',loaded('det')||loaded('led')],['Balance de prueba sin terceros acumulado año',loaded('bal')],['Movimiento general del período',loaded('led')],['Depuración rentas de trabajo',loaded('sal')||loaded('nom')],['Anexos explicativos',loaded('det')||loaded('dian')]].map(([doc,b])=>({doc,estado:ok(b)})):[];
+  const docsOtros=ret?[{doc:'Borrador de la declaración diligenciado en el portal',estado:ok(hasForm())},{doc:'Acceso a los consecutivos de documento soporte (egresos, recibos de caja, causaciones, notas, etc.)',estado:ok(loaded('dian'))}]:[];
+  return{c,secs,impuestos,docsExcel,docsOtros};
+}
+function abrirInforme(){
+  const d=datosInforme();if(!d.secs.length){toast('Primero ejecuta la revisión: el informe se arma con sus resultados.');return;}
+  const c=d.c,p=pdata(),atnKey='tributek_atn:'+(c.nit||c.id);let atn='';try{atn=localStorage.getItem(atnKey)||'';}catch(e){}
+  const prev=document.activeElement,ov=document.createElement('div');ov.className='overlay';ov.id='dlgInforme';
+  const hall=d.secs.map((s,i)=>`<h4 style="margin:14px 0 4px">${esc(s.titulo)} · ${esc(periodoCortoES(s.periodo))}</h4>${s.hallazgos.length?s.hallazgos.map((h,j)=>`<div class="hall"><label style="display:flex;gap:8px;align-items:flex-start;font-weight:600;margin:0"><input type="checkbox" data-hi="${i}:${j}" ${h.estado==='err'?'checked':''}><span>${esc(h.titulo)} <small style="font-weight:400">· ${h.estado==='err'?'error':'advertencia'}</small></span></label><small style="display:block;margin:4px 0 6px;color:var(--muted,#555)">${esc(h.texto.slice(0,240))}${h.texto.length>240?'…':''}</small><textarea rows="2" data-hr="${i}:${j}" placeholder="Respuesta de la administración (opcional)"></textarea></div>`).join(''):'<p class="hint">Sin hallazgos: el informe dirá que se revisó con auxiliares y soportes.</p>'}`).join('');
+  const pagar=d.secs.map((s,i)=>`<label for="inf_v${i}">${esc(s.titulo)} (valor por pagar, $)</label><input type="text" inputmode="numeric" id="inf_v${i}" data-vi="${i}" value="${s.valor===''?'':esc(String(s.valor))}" placeholder="Sin valor: no se incluye">`).join('');
+  ov.innerHTML=`<div class="dialogo dlg-informe" role="dialog" aria-modal="true" aria-labelledby="infT"><h3 id="infT">Informe al cliente (Word)</h3><p class="hint">La carta de «Revisión de impuestos» con la plantilla de la revisión: vencimientos, impuestos revisados, documentos recibidos, hallazgos y valores por pagar. No lleva logos ni datos de ninguna firma; después la puedes editar en Word.</p>
+    <label for="inf_atn">Atención a (nombre y cargo)</label><input type="text" id="inf_atn" value="${esc(atn)}" placeholder="Ej.: Nombre Apellido – Contador" autocomplete="off">
+    <div class="row" style="gap:12px;align-items:flex-end"><div style="flex:1"><label for="inf_f">Fecha del informe</label><input type="date" id="inf_f" value="${hoyISO()}"></div><div style="flex:1"><label for="inf_r">Fecha de revisión</label><input type="date" id="inf_r" value="${esc((p.meta&&p.meta.visita)||hoyISO())}"></div></div>
+    <h4 style="margin:16px 0 0">Hallazgos</h4><p class="hint" style="margin:2px 0 0">Vienen marcados los errores; las advertencias las eliges tú.</p>${hall}<h4 style="margin:16px 0 0">Valor por pagar</h4>${pagar}
+    <div class="row" style="margin-top:18px"><button class="btn" id="inf_ok">Generar informe</button><button class="btn ghost" id="inf_x">Cancelar</button></div></div>`;
+  document.body.appendChild(ov);
+  const cerrar=()=>{ov.remove();if(prev&&prev.focus)prev.focus();};
+  ov.addEventListener('click',e=>{if(e.target===ov)cerrar();});ov.addEventListener('keydown',e=>{if(e.key==='Escape')cerrar();});
+  ov.querySelector('#inf_x').addEventListener('click',cerrar);
+  ov.querySelector('#inf_ok').addEventListener('click',async()=>{
+    const val=id=>(ov.querySelector(id)||{}).value||'',atnV=val('#inf_atn').trim();try{localStorage.setItem(atnKey,atnV);}catch(e){}
+    const secciones=d.secs.map((s,i)=>({titulo:s.titulo,revisado:true,hallazgos:s.hallazgos.map((h,j)=>({h,j})).filter(x=>(ov.querySelector(`[data-hi="${i}:${x.j}"]`)||{}).checked).map(x=>({texto:x.h.texto,tabla:x.h.tabla,respuesta:val(`[data-hr="${i}:${x.j}"]`).trim()}))}));
+    const porPagar=d.secs.map((s,i)=>({concepto:s.titulo,valor:String(val('#inf_v'+i)).replace(/[^\d-]/g,'')})).filter(x=>x.valor!==''&&!isNaN(+x.valor));
+    const venc=d.secs.filter(s=>s.venc).map(s=>({texto:s.titulo,fecha:s.venc}));
+    const inf=armarInforme({ciudad:String(c.municipio||'Bogotá D.C.'),fecha:val('#inf_f')||hoyISO(),cliente:{razon:c.razon,nit:c.nit},atn:atnV,vencimientos:venc,fechaRevision:val('#inf_r')||hoyISO(),impuestos:d.impuestos,docsExcel:d.docsExcel,docsOtros:d.docsOtros,secciones,porPagar});
+    try{const bytes=construirDocx(inf),corto=String(c.razon||'cliente').replace(/\b(S\.?A\.?S\.?|S\.?A\.?|LTDA\.?)\b/gi,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim().split(' ').slice(0,3).join('_'),per=periodoCortoES(periodoImp(d.secs[0].imp)).replace(/\s+/g,'_');
+      cerrar();await saveFile('Informe_Revision_impuestos_'+per+'_-_'+(corto||'cliente')+'.docx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
+    catch(e){console.error(e);toast('No pude generar el informe en Word.');}});
+  setTimeout(()=>{const f=ov.querySelector('#inf_atn');if(f)f.focus();},0);
 }
 async function download(){
   carpetaPrepara();
@@ -15162,6 +15300,7 @@ document.addEventListener('click',async e=>{
   else if(a==='clearslot'){if(S.imp==='ica'){delete S.ica.data[b.dataset.k];}else if(S.imp==='reteica'){delete S.rica.data[b.dataset.k];if(b.dataset.k==='f131')S.rica.form=formRicaVacio();}else{delete S.data[b.dataset.k];if(b.dataset.k==='form')resetForm();}render();}
   else if(a==='run'){await ejecutarConEstado();}
   else if(a==='dl'){download();}
+  else if(a==='informe'){abrirInforme();}
   else if(a==='export'){exportClients();}
   else if(a==='carpeta'){carpetaElegir();}
   else if(a==='carpetaquitar'){carpetaQuitar();}
