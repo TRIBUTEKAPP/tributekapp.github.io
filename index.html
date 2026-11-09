@@ -1386,6 +1386,7 @@ function msg(codigo, vars) {
    20 · Libros de Excel pesados y elección de hojas
    21 · Depuración de salarios (art. 383 del E.T., procedimiento 1)
    22 · Facturas emitidas: cruce factura por factura con la contabilidad
+   23 · Informe de compras con retenciones (SAP Business One)
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -1817,6 +1818,10 @@ const CAS350=[ // [concepto, base jurídicas, ret jurídicas, base naturales, re
  ['AUTORRETENCIONES',59,68,null,null],['AUTORRETENCIONES',60,69,113,121],['AUTORRETENCIONES',61,70,114,122],['AUTORRETENCIONES',62,71,115,123],['AUTORRETENCIONES',63,72,116,124],
  ['AUTORRETENCIONES',64,73,117,125],['AUTORRETENCIONES',65,74,118,126],['AUTORRETENCIONES',66,75,119,127],['AUTORRETENCIONES',67,76,120,128]];
 /* Autorretenciones del 350: [clave, texto, base jurídicas, ret. jurídicas, base naturales, ret. naturales] */
+/* Rubros del formulario 350 que la tabla por concepto agrupa en «OTROS» (el formulario impreso los trae uno por fila): [clave, texto, base PJ, ret PJ, base PN, ret PN] */
+const OTROS_FILAS=[['PENSIONES','Rentas de pensiones',null,null,78,94],['REGALIAS','Regalías y explotación de la propiedad intelectual',34,47,84,100],['DIVIDENDOS','Dividendos y participaciones',35,48,85,101],['TARJETAS','Transacciones con tarjetas débito y crédito',37,50,87,103],['CONSTRUCCION','Contratos de construcción',38,51,88,104],['ENAJENACION','Enajenación de activos fijos de personas naturales ante notarios y autoridades de tránsito',null,null,89,105],['LOTERIAS','Loterías, rifas, apuestas y similares',39,52,90,106],['HIDROCARBUROS','Hidrocarburos, carbón y demás productos mineros',40,53,91,107],['OTROSPAGOS','Otros pagos sujetos a retención',41,54,92,108]];
+function otrosDesdeMapa(cas){const g=k=>(cas&&+cas[k])||0,o={};for(const [k,,pb,pr,nb,nr] of OTROS_FILAS)o[k]={pjBase:pb?g(pb):0,pjRet:pr?g(pr):0,pnBase:nb?g(nb):0,pnRet:nr?g(nr):0};return o;}
+function otrosTexto(cas){const o=otrosDesdeMapa(cas),n=OTROS_FILAS.filter(([k])=>o[k].pjBase||o[k].pjRet||o[k].pnBase||o[k].pnRet).map(([,t])=>t);return n.length?'dentro de «Otros conceptos» (la tabla los suma en una fila; la hoja «Formulario» los detalla): '+n.join(', '):'';}
 const AUTO_FILAS=[['EXONERADOS','Contribuyentes exonerados de aportes (art. 114-1 E.T.)',59,68,null,null],['VENTAS','Ventas',60,69,113,121],['HONORARIOS','Honorarios',61,70,114,122],['COMISIONES','Comisiones',62,71,115,123],['SERVICIOS','Servicios',63,72,116,124],['RENDIMIENTOS','Rendimientos financieros',64,73,117,125],['PROVISIONALES','Pagos mensuales provisionales de carbón y petróleo',65,74,118,126],['HIDROCARBUROS','Exportación de hidrocarburos, carbón y demás productos mineros',66,75,119,127],['OTROSAUTO','Otros conceptos',67,76,120,128]];
 function autoDesdeMapa(v){const o={};for(const [k,,pb,pr,nb,nr] of AUTO_FILAS){const x={pjBase:pb?(v[pb]||0):0,pjRet:pr?(v[pr]||0):0,pnBase:nb?(v[nb]||0):0,pnRet:nr?(v[nr]||0):0};if(x.pjBase||x.pjRet||x.pnBase||x.pnRet)o[k]=x;}return o;}
 function autoTotales(auto){let base=0,ret=0;for(const k in (auto||{})){const x=auto[k]||{};base+=(+x.pjBase||0)+(+x.pnBase||0);ret+=(+x.pjRet||0)+(+x.pnRet||0);}return{base,ret,tiene:base!==0||ret!==0};}
@@ -3922,6 +3927,7 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
 }
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
 const autoBases=(rows,fam)=>{let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
+  if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
 function leerMovimiento(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'movimiento','un movimiento',rows,parseLedger):parseLedger(rows);}
@@ -12554,6 +12560,65 @@ function ruleEmitidas(ctx){
   x.items=X.items;x.exp=X.exp;return x;
 }
 
+/* ########## SECCIÓN 23 · Informe de compras con retenciones (SAP Business One) ########## */
+/* «Informe Compras - Retenciones» (Fecha inicial/final, Área de Valoración, Tipo Retención): un resumen por impuesto (Código, Nombre del Impuesto, Tarifa, Cuenta Contable, Base Impuesto, Valor Impuesto, Gran Total) y, por cada impuesto,
+   un bloque «Código Impuesto: X · nombre · Cuenta · Tarifa (%)» con el detalle por documento (Tipo, Num Doc, Referencia = factura del proveedor, Fecha, Nit con DV, Nombre Socio de Negocios, Base, Valor), subtotales y total.
+   También se lee el detalle plano (10 columnas sin encabezado: impuesto, cuenta, tipo, num doc, referencia, fecha, NIT, nombre, base, valor). Las líneas quedan como las demás de bases (cuenta, impuesto, documento, tercero, base, retención). */
+const _scN=v=>typeof v==='number'?v:(v===''||v==null?NaN:parseFloat(String(v).replace(/\s/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.')));
+const _scT=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+const _scFecha=v=>{const s=_scT(v);return/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)?s:'';};
+function parseInformeComprasRet(rows){
+  const nz=v=>v!==''&&v!=null,N=r=>(r||[]).map(_scN),at=(r,c)=>c==null||c<0?'':[r[c],r[c+1],r[c-1]].find(nz)??'';   // el informe se imprime con celdas combinadas: los datos pueden caer una columna a la derecha o a la izquierda de su encabezado
+  let hi=-1,col=null,titulo=false;
+  for(let i=0;i<Math.min(rows.length,12);i++)for(const v of rows[i]||[])if(/^informe (de )?compras\s*-\s*retenci/.test(_dpn(v)))titulo=true;
+  for(let i=0;i<rows.length&&hi<0;i++){const t=(rows[i]||[]).map(x=>_dpn(x)),f=s=>t.findIndex(x=>x===s);
+    if(f('num doc')>=0&&f('nit')>=0&&f('base impuesto')>=0&&f('valor impuesto')>=0){hi=i;col={tipo:f('tipo'),num:f('num doc'),ref:f('referencia'),fecha:f('fecha'),nit:f('nit'),nom:t.findIndex(x=>/^nombre socio/.test(x)),base:f('base impuesto'),val:f('valor impuesto')};}}
+  const out=[],resumen=[],bloques=new Map(),avisos=[];let empresa='',hasta='',granTotal=null,sinCuenta=0,formato='SAP Business One · Informe de compras – retenciones';
+  if(hi>=0)for(const r of rows.slice(0,3))for(const v of r||[])if(nz(v)&&!empresa&&!/^informe/i.test(_scT(v))){empresa=_scT(v);}
+  let tipoRet='';for(const r of rows.slice(0,12))for(const v of r||[]){const m=/^Tipo Retenci[oó]n:\s*(.+)$/i.exec(_scT(v));if(m&&!tipoRet)tipoRet=m[1].trim();}
+  if(tipoRet&&!/fuente/i.test(tipoRet))return{err:'Este informe de compras con retenciones es de «'+tipoRet+'», no de retención en la fuente.',informe:true};
+  for(const r of rows.slice(0,10))for(const v of r||[]){const m=/Fecha Final:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(_scT(v));if(m)hasta=m[1];}
+  const linea=(o,fuente)=>{const nitRaw=_scT(o.nit);if(!o.fecha||!nitRaw||isNaN(o.base)||isNaN(o.val))return null;
+    const nc=/nota\s*cr[eé]dito/i.test(o.tipoDoc);let base=o.base,ret=o.val;if(nc&&base>0&&ret>=0){base=-base;ret=-ret;}   // en el informe las notas crédito ya vienen negativas; si vinieran positivas se restan
+    return{fecha:o.fecha,doc:_scT(o.num),cta:o.cta,nom:o.nom,ter:nitBase(nitRaw),terRaw:nitRaw,terN:_scT(o.terN),desc:_scT(o.ref),cc:'',deb:0,cre:0,base,ret,tarifaInforme:o.tar,ref:_scT(o.ref),tipoDoc:_scT(o.tipoDoc),codImpuesto:o.cod||'',notaCredito:nc};};
+  if(hi>=0){   // informe completo, por bloques
+    let cod='',nom='',cta='',tar=null;
+    for(let i=0;i<rows.length;i++){const r=rows[i]||[],cel=r.map(_scT),a=cel.find(x=>x)||'';
+      if(/^gran total:?$/i.test(a)||cel.some(x=>/^gran total:?$/i.test(x))){const nums=N(r).filter(x=>!isNaN(x));if(!granTotal&&nums.length>=2)granTotal={base:nums[0],val:nums[1]};continue;}
+      let m=/^C[oó]digo Impuesto:\s*(\S+)/i.exec(a);
+      if(m){const tcel=cel.find(x=>/^Tarifa \(%\):/i.test(x)),cc=cel.find(x=>/^Cuenta:/i.test(x)),nm=cel.slice(1).find(x=>x&&!/^(Cuenta|Tarifa)/i.test(x)&&isNaN(_scN(x)));
+        if(tcel){cod=m[1];nom=nm||'';cta=((/(\d{4,})/.exec(cc||'')||[])[1])||'';tar=_scN(String(tcel).replace(/^Tarifa \(%\):\s*/i,''));if(!bloques.has(cod))bloques.set(cod,{cod,nom,cta,tar,base:0,val:0,cab:null,n:0});}
+        else{const nums=N(r).filter(x=>!isNaN(x));if(nums.length>=2&&bloques.has(m[1]))bloques.get(m[1]).cab={base:nums[0],val:nums[1]};}
+        continue;}
+      if(!cod)continue;
+      const l=linea({tipoDoc:at(r,col.tipo),num:at(r,col.num),ref:at(r,col.ref),fecha:_scFecha(at(r,col.fecha)),nit:at(r,col.nit),terN:col.nom>=0?at(r,col.nom):'',base:_scN(at(r,col.base)),val:_scN(at(r,col.val)),cta,nom,tar,cod});
+      if(l){out.push(l);const b=bloques.get(cod);b.base+=l.base;b.val+=l.ret;b.n++;}}
+    // resumen del informe (arriba): Código, Nombre del Impuesto, Tarifa, Cuenta Contable, Base Impuesto, Valor Impuesto
+    for(let i=0;i<rows.length;i++){const t=(rows[i]||[]).map(x=>_dpn(x));if(t.includes('codigo')&&t.includes('nombre del impuesto')){const c={cod:t.indexOf('codigo'),nom:t.indexOf('nombre del impuesto'),tar:t.findIndex(x=>/^tarifa/.test(x)),cta:t.findIndex(x=>/^cuenta contable/.test(x)),base:t.indexOf('base impuesto'),val:t.indexOf('valor impuesto')};
+      for(let j=i+1;j<rows.length;j++){const q=rows[j]||[],a=_scT(q[c.cod]);if(/^tipo retenci/i.test(a)||(q||[]).some(x=>/^gran total/i.test(_scT(x))))break;
+        const ic=q.findIndex(x=>/^2365\d{3,}$/.test(_scT(x))),nums=q.filter((x,k)=>typeof x==='number'&&k!==ic);if(a&&ic>=0&&nums.length>=3)resumen.push({cod:a,nom:_scT(q.slice(1).find(x=>typeof x==='string'&&_scT(x)&&!/^2365\d{3,}$/.test(_scT(x)))),tar:nums[0],cta:_scT(q[ic]),base:nums[nums.length-2],val:nums[nums.length-1]});}   // Código, nombre, tarifa, cuenta, base, valor: las columnas del encabezado no coinciden con las de los datos (celdas combinadas)
+      break;}}
+    // controles internos: el detalle debe coincidir con el resumen, con el total de cada bloque y con el gran total
+    const tol=1;
+    for(const rs of resumen){const b=bloques.get(rs.cod);if(!b){avisos.push('El resumen trae el impuesto '+rs.cod+' ('+rs.nom+') y el detalle no.');continue;}
+      if(Math.abs(b.base-rs.base)>tol||Math.abs(b.val-rs.val)>tol)avisos.push('El detalle de «'+rs.nom+'» ('+rs.cod+') suma base $'+fm(b.base)+' y retención $'+fm(b.val)+', pero el resumen del informe dice base $'+fm(rs.base)+' y retención $'+fm(rs.val)+'.');}
+    for(const b of bloques.values())if(b.cab&&Math.abs(b.base-b.cab.base)>tol&&!avisos.some(x=>x.includes('('+b.cod+')')))avisos.push('El detalle de «'+b.nom+'» ('+b.cod+') no coincide con el total de su bloque (base $'+fm(b.base)+' vs. $'+fm(b.cab.base)+').');
+    if(granTotal){const sb=out.reduce((s,x)=>s+x.base,0),sv=out.reduce((s,x)=>s+x.ret,0);if(Math.abs(sb-granTotal.base)>tol||Math.abs(sv-granTotal.val)>tol)avisos.push('El detalle suma base $'+fm(sb)+' y retención $'+fm(sv)+', pero el «Gran Total» del informe dice base $'+fm(granTotal.base)+' y retención $'+fm(granTotal.val)+'.');}
+  }else{   // detalle plano de 10 columnas (impuesto, cuenta, tipo, num doc, referencia, fecha, NIT, nombre, base, valor)
+    const cand=rows.filter(r=>r&&/^2365\d{2,}$/.test(_scT(r[1]))&&_scFecha(r[5])&&_scT(r[6]));
+    if(cand.length<3&&!titulo)return{err:'No reconocí el informe de compras con retenciones (SAP Business One): falta el encabezado «Num Doc / Nit / Base Impuesto / Valor Impuesto».'};
+    formato='SAP Business One · Informe de compras – retenciones (detalle plano)';
+    for(const r of rows){if(!r||!_scFecha(r[5])||!_scT(r[6]))continue;const cta=/^2365\d{2,}$/.test(_scT(r[1]))?_scT(r[1]):'';
+      if(!cta){sinCuenta++;continue;}
+      const l=linea({nom:_scT(r[0]),cta,tipoDoc:r[2],num:r[3],ref:r[4],fecha:_scFecha(r[5]),nit:r[6],terN:r[7],base:_scN(r[8]),val:_scN(r[9]),tar:null,cod:''},'plano');if(l)out.push(l);}
+    if(sinCuenta)avisos.push(sinCuenta+(sinCuenta===1?' línea sin cuenta (p. ej. una nota crédito) no se pudo asignar a un impuesto y no se tomó':' líneas sin cuenta (p. ej. notas crédito) no se pudieron asignar a un impuesto y no se tomaron')+': el informe completo sí trae a qué impuesto pertenecen.');}
+  if(!out.length)return{err:'No encontré líneas de retención en el informe de compras (SAP Business One).'};
+  // la tarifa de cada línea contra la del impuesto en el informe
+  const fuera=out.filter(l=>l.tarifaInforme>0&&l.base&&Math.abs(l.ret/l.base*100-l.tarifaInforme)>0.05&&Math.abs(l.ret-l.base*l.tarifaInforme/100)>1);
+  if(fuera.length)avisos.push(fuera.length+(fuera.length===1?' línea tiene':' líneas tienen')+' una retención que no corresponde a la tarifa del impuesto en el informe (p. ej. documento '+fuera[0].doc+': '+(fuera[0].ret/fuera[0].base*100).toFixed(2)+' % frente a '+fuera[0].tarifaInforme+' %).');
+  return{rows:out,hasBase:out.some(x=>x.base>0),formato,resumen,completo:hi>=0,totalInforme:granTotal,empresa,hasta,sinCuenta,avisos};
+}
+
 
 
 /* ÍNDICE · checklist — Actividades del checklist
@@ -12805,6 +12870,21 @@ function xFormulario(wb,d){
           ws.getCell(r,7).value={formula:`B${r}+D${r}`,result:vals[0]+vals[2]};ws.getCell(r,8).value={formula:`C${r}+E${r}`,result:vals[1]+vals[3]};
           [7,8].forEach(c2=>{const y=ws.getCell(r,c2);y.numFmt=XMONEY;y.font=xf(gris);y.fill=xfill(XC.tot);});
           ws.getCell(r,9).value=(pb?pb+'-'+pr:'')+(nb?' / '+nb+'-'+nr:'');ws.getCell(r,9).font=xf({size:8,color:{argb:'FF7F7F7F'}});ws.getCell(r,9).alignment={horizontal:'center'};r++;}
+        // la fila agregada es la suma del detalle: si se corrige una línea, el total se actualiza
+        [2,3,4,5].forEach(c2=>{const L=String.fromCharCode(64+c2),cell=ws.getCell(rAgg,c2),res=typeof cell.value==='number'?cell.value:0;cell.value={formula:`SUM(${L}${d0}:${L}${r-1})`,result:res};});}
+    }
+    if(k==='OTROS'){   // detalle: una fila por rubro de los que la tabla agrupa en «Otros» (pensiones, regalías, dividendos, tarjetas, construcción, enajenación, loterías, hidrocarburos y otros pagos)
+      const gris={size:9,italic:true,color:{argb:'FF595959'}},det=d.cas?otrosDesdeMapa(d.cas):null,campos=['pjBase','pjRet','pnBase','pnRet'];
+      const sum=det?campos.map(c2=>OTROS_FILAS.reduce((s,[ak])=>s+det[ak][c2],0)):null,tiene=v.pjBase||v.pjRet||v.pnBase||v.pnRet||v.base||v.ret;
+      const coincide=det&&v.split&&campos.every((c2,i)=>Math.abs(sum[i]-(+v[c2]||0))<0.5),conValor=sum&&sum.some(n2=>n2);
+      if(tiene&&!coincide){ws.getCell(r,1).value='   Sin detalle por casilla: el formulario se cargó solo con los totales por concepto, o se corrigió la fila agregada.';ws.getCell(r,1).font=xf(gris);r++;}
+      else if(coincide&&conValor){const d0=r;
+        for(const [ak,atx,pb,pr,nb,nr] of OTROS_FILAS){const x2=det[ak],vals=[x2.pjBase,x2.pjRet,x2.pnBase,x2.pnRet];
+          ws.getCell(r,1).value='   ↳ '+atx;ws.getCell(r,1).font=xf(gris);
+          vals.forEach((n2,i)=>{const cell=ws.getCell(r,2+i);cell.value=n2;cell.numFmt=XMONEY;cell.font=xf(gris);cell.fill=xfill(i<2?XC.jur:XC.nat);});
+          ws.getCell(r,7).value={formula:`B${r}+D${r}`,result:vals[0]+vals[2]};ws.getCell(r,8).value={formula:`C${r}+E${r}`,result:vals[1]+vals[3]};
+          [7,8].forEach(c2=>{const y=ws.getCell(r,c2);y.numFmt=XMONEY;y.font=xf(gris);y.fill=xfill(XC.tot);});
+          ws.getCell(r,9).value=(pb?pb+'-'+pr:'')+(nb?(pb?' / ':'')+nb+'-'+nr:'');ws.getCell(r,9).font=xf({size:8,color:{argb:'FF7F7F7F'}});ws.getCell(r,9).alignment={horizontal:'center'};r++;}
         // la fila agregada es la suma del detalle: si se corrige una línea, el total se actualiza
         [2,3,4,5].forEach(c2=>{const L=String.fromCharCode(64+c2),cell=ws.getCell(rAgg,c2),res=typeof cell.value==='number'?cell.value:0;cell.value={formula:`SUM(${L}${d0}:${L}${r-1})`,result:res};});}
     }
@@ -13230,8 +13310,8 @@ function xAutorret(wb,d){
   const r41=fila('Movimiento del período de la cuenta 41 (ingresos operacionales)',f41,dt&&dt.B41,ro['41']?'Saldo final (columna F) menos saldo anterior (columna C) de la cuenta 41, fila '+ro['41']+' de la hoja «Balance», con el signo cambiado: el balance suele acumular el año.':'Saldo final menos saldo anterior de las cuentas 41xx de la hoja «Balance», con el signo cambiado.',true);
   const tg=id=>dt&&dt.targets.find(x=>x.id===id);
   const rFD=fila('Diferencia formulario − DIAN',hayDian?`B${rF}-B${rD}`:null,tg('FD')&&tg('FD').v,'',false,true);
-  const rD41=fila('Diferencia DIAN − cuenta 41',hayDian?`B${rD}-B${r41}`:null,tg('D41')&&tg('D41').v,'',false,true);
-  const rF41=fila('Diferencia formulario − cuenta 41',`B${rF}-B${r41}`,tg('F41')&&tg('F41').v,'',false,true);
+  const rD41=fila('Diferencia DIAN − cuenta 41',hayDian&&f41?`B${rD}-B${r41}`:null,tg('D41')&&tg('D41').v,'',false,true);
+  const rF41=fila('Diferencia formulario − cuenta 41',f41?`B${rF}-B${r41}`:null,tg('F41')&&tg('F41').v,'',false,true);
   r++;
   ws.getCell(r,1).value='Análisis de la cuenta '+((dt&&dt.pref)||['42']).join('/')+' (partidas que cierran cada diferencia)';ws.getCell(r,1).font=xf({bold:true});r++;
   hdr(ws,r,['Cuenta','Movimiento del período (crédito +)','Cierra «formulario − DIAN»','Cierra «DIAN − cuenta 41»','Cierra «formulario − cuenta 41»'],XC.indigo);r++;
@@ -13302,7 +13382,7 @@ function datosPapel(ctx,results,extra){
   const d=Object.assign({client:ctx.client,meta:ctx.meta,period:ctx.period,results,CHECK,form:extra.form,ivaC:extra.ivaC,ex:extra.ex,rules:ctx.rules,tol:ctx.tol,bal:ctx.bal||[],lines:retLines(ctx),flags:flagsDe(results),dianObs:((results||[]).find(r=>r.id==='cruceret')||{}).porLinea||{},salTodos:((results||[]).find(r=>r.id==='salarios')||{}).todos||[],salSin:((results||[]).find(r=>r.id==='salarios')||{}).sinModelo||[],uvt:ctx.uvt,
     muestraDocs:new Set(mu&&mu.rows?mu.rows.map(x=>x.Documento):[]),muestraN:mu&&mu.rows?mu.rows.length:0,
     recTodos:((results||[]).find(r=>r.id==='dianrec')||{}).todos||[],dsTodos:((results||[]).find(r=>r.id==='ds')||{}).todos||[],baseTodos:((results||[]).find(r=>r.id==='basedian')||{}).todos||[],
-    auto:extra.auto||{},emiRows:autoTotales(extra.auto).tiene?((ctx.emi&&ctx.emi.rows)||[]):[],recHdr:(ctx.rec&&ctx.rec.hdr)||null,dsHdr:(ctx.ds&&ctx.ds.hdr)||null,emiHdr:(ctx.emi&&ctx.emi.hdr)||null,
+    auto:extra.auto||{},cas:extra.cas||null,emiRows:autoTotales(extra.auto).tiene?((ctx.emi&&ctx.emi.rows)||[]):[],recHdr:(ctx.rec&&ctx.rec.hdr)||null,dsHdr:(ctx.ds&&ctx.ds.hdr)||null,emiHdr:(ctx.emi&&ctx.emi.hdr)||null,
     loaded:extra.loaded,ck:extra.ck,movRaw:extra.movRaw||null,sinBannerHB:true},{});
   if(autoTotales(d.auto).tiene){const pf=String((ctx.client&&ctx.client.autoCtas2)||'42').split(/[,;\s]+/).filter(Boolean);d.balPrefijos=['2365','2367','41',...pf];d.balExtra=['2','23','4'];d.balNota=' · cuentas 2365, 2367, 41 y '+pf.join(', ')+' (autorretención)';}
   d.conclusion=borradorConclusion(d)+textoCierre(extra.cierre);return d;
@@ -13816,6 +13896,7 @@ function aplicar350(r,f,via){
   if(r.faltantes.length)partes.push('casillas sin leer: '+r.faltantes.join(', '));
   if(r.casillasDudosas.length)partes.push('casillas de baja confianza: '+r.casillasDudosas.join(', '));
   const aT=autoTotales(r.auto);if(aT.tiene)partes.push('trae autorretenciones: se cruzan los ingresos con la DIAN y la cuenta 41');
+  const ot=otrosTexto(r.map);if(ot)partes.push(ot);
   S.data.form={names:[f.name],parsed:r,info:via+' · '+partes.join(' · ')+' · verifica los valores',warn:!r.okTodo||r.faltantes.length>0||r.casillasDudosas.length>0};
 }
 async function loadForm350Ocr(f){
@@ -13965,7 +14046,7 @@ async function loadSlot(k,files,opc){
     r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice,hojasTxt:textoHojas(usadasL,ignL)}:(last||{err:'El archivo está vacío.'});}
   else if(k==='det'){let best=null,bkey=null,last=null;const fam=S.imp==='reteica'?'reteica':'retefuente';for(const sh of all){const x=leerBases(sh.rows,sw,fam);if(x.err){last=x;continue;}
       const esBases=y=>!!(y&&y.formato&&/bases de retención/.test(y.formato));   // el reporte de bases de SIIGO trae base, retención y tipo de persona
-      const kk=[sh.hidden?0:1,esBases(x)?1:0,x.hasBase?1:0,x.rows.length];if(!best||cmpK(kk,bkey)>0){best=x;bkey=kk;}}r=best||last||{err:'El archivo está vacío.'};}
+      const kk=[sh.hidden?0:1,esBases(x)?1:0,x.hasBase?1:0,x.completo?1:0,x.rows.length];if(!best||cmpK(kk,bkey)>0){best=x;bkey=kk;}}r=best||last||{err:'El archivo está vacío.'};}
   else if(k==='dian'){   // el reporte puede venir partido en varios archivos: se leen todos y se unen como un solo reporte (antes solo se conservaba el de más filas)
     const ok=[],mal=[],usadasD=[],ignD=[];let ultimo=null,respaldoD=null;
     porArchivo.forEach((sh,i)=>{const cands=[];for(const s of sh){const x=parseDian(s.rows);if(x.err){ultimo=x;continue;}cands.push({name:s.name,hidden:!!s.hidden,x});}
@@ -13981,6 +14062,7 @@ async function loadSlot(k,files,opc){
   else if(k==='form'){
     r=parseForm350Casillas(all.map(s=>s.rows));
     if(!r.err){S.form=Object.assign({},r.form);S.auto=Object.assign({},r.auto||{});S.cas=Object.assign({},r.map||{});S.ivaC=Object.assign({},r.ivaC);S.ex=Object.assign({},r.ex);syncIva();r.viaCasillas=true;}
+    else if(all.some(s=>{const y=parseInformeComprasRet(s.rows);return !y.err||y.informe;})){DD[k]={names,err:mt('LEC-TIP-001',{parece:QUE_ES.det,esperado:QUE_ES.form,espacio:ESPACIOS.det})};return;}   // el informe de compras con retenciones (SAP) trae rótulos como «Compras» u «Honorarios» y el lector de respaldo lo confundía con el formulario
     else{r=parseForm(all.map(s=>s.rows));if(!r.err){S.form=Object.assign({},r.form);S.auto={};S.cas=casDesdeForm(S.form,{});S.ivaC=r.ivaC?Object.assign({},r.ivaC):{c131:r.iva,c132:null,c133:null};syncIva();}}}
   if(r.err&&['bal','led','det','dian'].includes(k)&&all.length){const q=identificarArchivo(all.map(s=>s.rows),k,sw);if(q){DD[k]={names,err:mt('LEC-TIP-001',{parece:q.parece,esperado:QUE_ES[k],espacio:q.espacio})};return;}}
   if(r.err){DD[k]={names,err:r.err};return;}
@@ -13988,7 +14070,7 @@ async function loadSlot(k,files,opc){
   const tipoCt=k==='bal'?'bal':(k==='led'||k==='det')?'led':k==='dian'?'dian':null;const ct=tipoCt?contrato(tipoCt,r):null;
   if(ct&&!ct.ok){DD[k]={names,err:ct.err};return;}
   const n=r.rows?r.rows.length:(k==='nom'?r.n:Object.keys(r.form||{}).length);
-  if(k==='form'&&r.viaCasillas){S.data.form={names,parsed:r,info:r.casillas+' casillas leídas del formulario'+(r.ok130?' · la suma de los conceptos coincide con la casilla 130':' · la suma de los conceptos NO coincide con la casilla 130: revisa la tabla'),warn:!r.ok130};return;}
+  if(k==='form'&&r.viaCasillas){S.data.form={names,parsed:r,info:r.casillas+' casillas leídas del formulario'+(r.ok130?' · la suma de los conceptos coincide con la casilla 130':' · la suma de los conceptos NO coincide con la casilla 130: revisa la tabla')+(otrosTexto(r.map)?' · '+otrosTexto(r.map):''),warn:!r.ok130};return;}
   const sp=k==='dian'?splitDian(r,S.period,cur()&&cur().nit):null;
   const info=k==='dian'?r.rows.length.toLocaleString('es-CO')+' filas · '+sp.rec.rows.length+' recibidos en '+S.period+' · '+sp.ds.rows.length+' documentos soporte emitidos'+(sp.fuera-sp.sinFecha?' · '+(sp.fuera-sp.sinFecha)+' filas fuera del período se ignoran':''):k==='nom'?r.n+' empleados con retención en '+r.hojas+' hoja(s)':k==='form'?n+' conceptos reconocidos':n.toLocaleString('es-CO')+' filas leídas'+(r.hasBase?' · incluye base':'')+(k==='led'&&r.archivos>1?' · de '+r.archivos+' archivos':'')+((k==='led'||k==='det')&&r.formato?' · '+r.formato:'');
   let info2=info,warn2=false;
@@ -14012,6 +14094,9 @@ async function loadSlot(k,files,opc){
   if((k==='led'||k==='det')&&r.agregado){info2+=' · es por tercero, sin documentos: sirve para cuadrar por jurídicas y naturales; para los cruces con la DIAN carga el libro auxiliar o el movimiento de cuentas';warn2=true;}
   if((k==='led'||k==='det')&&r.corteTxt){info2+=' · corresponde a '+r.corteTxt;if(S.imp==='retefuente'&&r.corte&&r.corte!==S.period){info2+=' · '+mt('LEC-PER-001',{mesArchivo:r.corteTxt,mesElegido:periodoTxt(S.period)});warn2=true;}}
   if(r.leidoComo){info2+=' · OJO: Leído como '+r.leidoComo+'; tu perfil dice '+r.perfilDice;warn2=true;}   // el lector del programa del perfil no lo reconoció; lo leyó la detección automática
+  if(k==='det'&&r.completo!==undefined&&/SAP Business One/.test(r.formato||'')){const ex=[];if(r.empresa)ex.push(r.empresa);
+    const mh=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(r.hasta||'');if(mh){const mp=mh[3]+'-'+mh[2].padStart(2,'0');ex.push('corresponde a '+periodoTxt(mp));if(S.imp==='retefuente'&&mp!==S.period){ex.push(mt('LEC-PER-001',{mesArchivo:periodoTxt(mp),mesElegido:periodoTxt(S.period)}));warn2=true;}}
+    const nNC=r.rows.filter(x=>x.notaCredito).length;ex.push(new Set(r.rows.map(x=>x.cta)).size+' impuestos · base $'+fm(r.rows.reduce((s,x)=>s+x.base,0))+' · retención $'+fm(r.rows.reduce((s,x)=>s+x.ret,0))+(nNC?' · '+nNC+(nNC===1?' nota crédito':' notas crédito'):''));info2+=' · '+ex.join(' · ');}
   if((k==='led'||k==='det')&&r.avisos&&r.avisos.length){info2+=' · OJO: '+r.avisos.join(' · ');warn2=true;}
   if(ct&&ct.avisos.length){info2+=' · OJO: '+ct.avisos.join(' · ');warn2=true;}
   DD[k]={names,parsed:k==='form'?r:r,info:info2,warn:warn2,partes:k==='dian'?r.partes:undefined};
@@ -14865,7 +14950,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega49';
+const APP_ENTREGA='fase4b-entrega51';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -14961,7 +15046,7 @@ async function download(){
   if(!window.ExcelJS){toast('No cargó la librería de Excel con formato; se genera una versión simple.');return downloadSimple();}
   try{
     const p=pdata();const ctx=buildCtx();
-    const d=datosPapel(ctx,S.results,{form:S.form,auto:S.auto,ivaC:S.ivaC,ex:S.ex,ck:p.ck,cierre:p.cierre,movRaw:(S.data.led&&S.data.led.parsed&&S.data.led.parsed.movRaw)||null,loaded:{bal:!!(S.data.bal&&S.data.bal.parsed),form:hasForm(),led:!!(S.data.led&&S.data.led.parsed),det:!!(S.data.det&&S.data.det.parsed),dian:!!(S.data.dian&&S.data.dian.parsed),nom:!!(S.data.nom&&S.data.nom.parsed)}});
+    const d=datosPapel(ctx,S.results,{form:S.form,auto:S.auto,cas:S.cas,ivaC:S.ivaC,ex:S.ex,ck:p.ck,cierre:p.cierre,movRaw:(S.data.led&&S.data.led.parsed&&S.data.led.parsed.movRaw)||null,loaded:{bal:!!(S.data.bal&&S.data.bal.parsed),form:hasForm(),led:!!(S.data.led&&S.data.led.parsed),det:!!(S.data.det&&S.data.det.parsed),dian:!!(S.data.dian&&S.data.dian.parsed),nom:!!(S.data.nom&&S.data.nom.parsed)}});
     const wb=buildPapelTrabajo(window.ExcelJS,marcaFirma(d));
     const buf=await wb.xlsx.writeBuffer();
     await saveFile(nombreArchivo(d),new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
