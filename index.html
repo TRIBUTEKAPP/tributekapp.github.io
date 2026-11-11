@@ -1622,6 +1622,7 @@ function parseTercerosPorCuenta(rows){
 const soloAgregado=ctx=>!!(ctx.led&&ctx.led.agregado&&!(ctx.det&&ctx.det.rows));
 const MSG_AGREGADO='El movimiento cargado es por tercero (sin documentos ni fechas): no se puede cruzar documento a documento. Carga el libro auxiliar general o el movimiento de cuentas de SIIGO.';
 function parseBalance(rows){
+  const sa=parseBalanceSalud(rows);if(!sa.err)return sa;   // libro mayor general del software de salud (encabezado propio)
   const sg=parseBalanceSiigo(rows);if(!sg.err)return sg;   // SIIGO primero: el lector estándar leería mal su código de cuenta
   const std=parseBalanceEstandar(rows);if(!std.err)return std;
   const alt=parseBalanceReporte(rows);if(!alt.err)return alt;
@@ -1763,9 +1764,87 @@ function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar co
   for(const h of hojas||[]){const rows=h&&h.rows?h.rows:h;
     try{if(!parseLibroMayorSap(rows).err)return{slot:'led',parece:'libro mayor de SAP Business One'};}catch(e){}
     try{if(!parseMovimientoDobleCodigo(rows).err)return{slot:'led',parece:'movimiento con doble código de cuenta (NIIF y local)'};}catch(e){}
-    try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}}
+    try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}
+    try{if(!parseModuloCxp(rows).err)return{slot:'det',parece:'módulo de cuentas por pagar del software de salud'};}catch(e){}
+    try{if(!parseMovimientoSalud(rows).err)return{slot:'led',parece:'movimiento por cuenta y tercero del software de salud'};}catch(e){}
+    try{if(!parseBalanceSalud(rows).err)return{slot:'bal',parece:'libro mayor general del software de salud'};}catch(e){}}
   return null;}
-function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
+/* ===== Software contable del sector salud (los impuestos van en la clase 22): libro mayor general y movimiento por cuenta y tercero ===== */
+/* En el plan de cuentas de ese software la retención en la fuente es 2201 (220101 salarios, 220103 honorarios, 220104 comisiones, 220105 servicios, 220106 arrendamientos, 220108 compras, 220110 pagos al exterior,
+   220115 retención de IVA y 220116 retención de ICA), con cuentas de 12 dígitos. La app trabaja con 2365, 2367 y 2368: al leer el balance (libro mayor general) y el movimiento por cuenta y tercero, las cuentas hoja se
+   TRADUCEN a su equivalente estándar (se conserva la original en ctaOrig). La tabla sale del maestro de conceptos del propio cliente (R01 a R21, RE1, RE2, IR1). */
+const SALUD_CUENTAS=[   // [cuenta de 12 dígitos, cuenta estándar, tarifa en % (null si no es un porcentaje de la base)]
+  ['220101060101','23650501',null],['220103060101','23651501',10],['220103060102','23651502',11],['220103060104','23651510',null],['220104060101','23652001',11],['220104060102','23652002',10],
+  ['220105060101','23652501',6],['220105060102','23652502',4],['220105060103','23652503',2],['220105060104','23652504',1],['220105060105','23652505',3.5],['220105060106','23652506',3.5],['220105060107','23651511',null],
+  ['220105060108','23652508',3.5],['220105060109','23652509',2],['220105060110','23659010',2],['220105060111','23652511',1],['220106060101','23653002',4],['220106060102','23653003',3.5],
+  ['220108060101','23654001',2.5],['220108060102','23654002',3.5],['220110060101','23655001',20],['220110060102','23655002',20],['220115060101','23670401',15],['220115060102','23670301',null]];
+const SALUD_PREFIJO={'220101':'236505','220103':'236515','220104':'236520','220105':'236525','220106':'236530','220108':'236540','220110':'236550','220115':'236704','220116':'236805'};   // cuentas que no están en la tabla: se traducen por su grupo y los dos últimos dígitos
+const SALUD_MAPA=new Map(SALUD_CUENTAS.map(c=>[c[0],c]));
+function ctaSaludAEstandar(c){const s=String(c||'').trim();if(s.length!==12||!/^\d+$/.test(s))return null;const t=SALUD_MAPA.get(s);if(t)return t[1];const p=SALUD_PREFIJO[s.slice(0,6)];return p?p+s.slice(-2):null;}
+function tarifaSalud(c,nom){const t=SALUD_MAPA.get(String(c||''));if(t&&t[2]!=null)return t[2];const m=/(\d+(?:[.,]\d+)?)\s*%/.exec(String(nom||''));return m&&!/x\s*mil/i.test(nom)?parseFloat(m[1].replace(',','.')):null;}
+const SALUD_NOMBRE_MAYOR={'2365':'RETENCION EN LA FUENTE','2367':'IMPUESTO A LAS VENTAS RETENIDO','2368':'IMPUESTO DE INDUSTRIA Y COMERCIO RETENIDO'};
+function parseBalanceSalud(rows){
+  const nz=s=>String(s==null?'':s).toLowerCase().trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,15)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);if(f('salcue')>=0&&f('salant')>=0&&f('saldeb')>=0&&f('salcre')>=0&&f('salnue')>=0){hi=i;c={cta:f('salcue'),nom:f('cuenom'),niv:f('cueniv'),sa:f('salant'),deb:f('saldeb'),cre:f('salcre'),sf:f('salnue')};}}
+  if(hi<0)return{err:'No encontré el encabezado del libro mayor (salcue, cuenom, salant, saldeb, salcre, salnue).'};
+  const out=[],may={};let tr=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],cta0=String(r[c.cta]==null?'':r[c.cta]).trim();if(!/^\d+$/.test(cta0))continue;
+    const fila={cta:cta0,nom:c.nom>=0?String(r[c.nom]||'').trim():'',sa:num(r[c.sa])||0,deb:num(r[c.deb])||0,cre:num(r[c.cre])||0,sf:num(r[c.sf])||0};
+    if(/^2201/.test(cta0)&&cta0.length<12)continue;   // los grupos de la retención se reemplazan por los mayores 2365, 2367 y 2368
+    const std=ctaSaludAEstandar(cta0);
+    if(std){tr++;const f=Object.assign({},fila,{cta:std,ctaOrig:cta0});out.push(f);const m=std.slice(0,4);const a=may[m]=may[m]||{sa:0,deb:0,cre:0,sf:0};a.sa+=f.sa;a.deb+=f.deb;a.cre+=f.cre;a.sf+=f.sf;}
+    else out.push(fila);}
+  if(!out.length)return{err:'No encontré cuentas en el libro mayor.'};
+  for(const [m,a] of Object.entries(may))out.push({cta:m,nom:SALUD_NOMBRE_MAYOR[m],sa:a.sa,deb:a.deb,cre:a.cre,sf:a.sf,sintetica:true});
+  return{rows:out,formato:'libro mayor general del software de salud (impuestos en la clase 22: '+tr+' cuentas de retención pasadas a 2365, 2367 y 2368)',ctasTraducidas:tr};
+}
+function parseMovimientoSalud(rows){
+  const nz=s=>String(s==null?'':s).toLowerCase().trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,15)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    if(f('as_movcue')>=0&&f('as_movnit')>=0&&f('as_movdoc')>=0&&f('ac_debitos')>=0&&f('ac_creditos')>=0){hi=i;c={cta:f('as_movcue'),nom:f('as_cuenom'),nit:f('as_movnit'),ter:f('as_nitnom'),ano:f('as_movano'),mes:f('as_movmes'),fue:f('as_movfue'),doc:f('as_movdoc'),des:f('as_movdes'),cco:f('as_movcco'),deb:f('ac_debitos'),cre:f('ac_creditos')};}}
+  if(hi<0)return{err:'No encontré el encabezado del movimiento (as_movcue, as_movnit, as_movdoc, ac_debitos, ac_creditos).'};
+  const tx=v=>String(v==null?'':v).trim(),out=[];let tr=0,conBase=0,pagos=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],cta0=tx(r[c.cta]);if(!/^\d{4,}$/.test(cta0))continue;
+    const nit=tx(r[c.nit]),terN=c.ter>=0?tx(r[c.ter]):'',deb=num(r[c.deb])||0,cre=num(r[c.cre])||0,fuente=c.fue>=0?tx(r[c.fue]):'',std=ctaSaludAEstandar(cta0);let cta=std||cta0,nom=c.nom>=0?tx(r[c.nom]):'';
+    const pago=!!std&&deb>0&&cre===0&&(digits(nit)==='800197268'||/DIRECCION DE IMPUESTOS/i.test(terN)||fuente==='23')&&!/^2368/.test(std);   // pago de la declaración: débito a la DIAN, no una retención
+    let ctaPagada;if(pago){ctaPagada=std;cta='23657501';nom='PAGO DE RETENCIONES (DIAN)';pagos++;}
+    const t=std&&!pago?tarifaSalud(cta0,nom):null;if(std&&!pago&&t&&!/%/.test(nom))nom=nom+' '+t+'%';
+    const a=cre-deb,base=t&&a?a/(t/100):null;if(base!=null)conBase++;if(std)tr++;
+    out.push({fecha:'',doc:String(tx(r[c.doc])).replace(/^0+(?=\d)/,''),cta,ctaOrig:std?cta0:undefined,nom,ter:/^\d+$/.test(nit)?nit:nit.toUpperCase(),terRaw:nit,terN,desc:c.des>=0?tx(r[c.des]):'',cc:c.cco>=0&&tx(r[c.cco])!=='00'?tx(r[c.cco]):'',fuente,anio:c.ano>=0?tx(r[c.ano]):'',mes:c.mes>=0?tx(r[c.mes]):'',deb,cre,base,ret:null,baseEstimada:base!=null||undefined,pago:pago||undefined,ctaPagada});}
+  if(!out.length)return{err:'No encontré movimientos en el archivo.'};
+  const per=[...new Set(out.map(x=>x.anio&&x.mes?x.anio+'-'+x.mes:'').filter(Boolean))];
+  return{rows:out,hasBase:conBase>0,baseEstimada:conBase>0,formato:'movimiento por cuenta y tercero del software de salud (impuestos en la clase 22'+(conBase?'; sin base en el reporte: se estima como retención ÷ tarifa de la cuenta':'')+')',ctasTraducidas:tr,pagos,periodoTxt:per.join(', ')};
+}
+/* Módulo de cuentas por pagar del software de salud (exportación en CSV): una fila por causación, retención en la fuente (R), retención de IVA (E), IVA (I), ReteICA (A) o descuento, con NIT, número de documento
+   (el mismo del movimiento contable), prefijo y número de la factura, FECHA, valor y BASE REAL. Solo se leen R, E y A; se une con el movimiento por documento, NIT y valor (enriquecerSalud) y le da a cada retención su base real, su fecha y su factura. */
+const SALUD_CONCEPTOS={R01:'220101060101',R02:'220103060101',R03:'220103060102',R04:'220103060104',R05:'220104060101',R06:'220104060102',R07:'220105060101',R08:'220105060102',R09:'220105060103',R10:'220105060104',R11:'220105060105',R12:'220105060106',R13:'220105060107',R14:'220105060108',R15:'220105060109',R16:'220105060110',R17:'220105060111',R18:'220106060101',R19:'220106060102',R20:'220108060101',R21:'220108060102',RE1:'220110060101',RE2:'220110060102',IR1:'220115060101',IR3:'220115060102',I02:'220116060102',I03:'220116060103',I04:'220116060104',I05:'220116060105',I06:'220116060106',I07:'220116060107',I08:'220116060108',I10:'220116060110',I11:'220116060111',I16:'220116060117'};
+function parseModuloCxp(rows){
+  const nz=s=>String(s==null?'':s).toLowerCase().trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,10)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    if(['pro','pronom','doc','pre','fac','fec','val','bas','con','tip'].every(k=>f(k)>=0)){hi=i;c={pro:f('pro'),nom:f('pronom'),fue:f('fue'),doc:f('doc'),pre:f('pre'),fac:f('fac'),fec:f('fec'),val:f('val'),bas:f('bas'),con:f('con'),tip:f('tip'),ano:f('ano'),mes:f('mes')};}}
+  if(hi<0)return{err:'No encontré el encabezado del módulo de cuentas por pagar (pro, pronom, doc, pre, fac, fec, val, bas, con, tip).'};
+  const tx=v=>String(v==null?'':v).trim(),out=[];let omitidas=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],tip=tx(r[c.tip]).toUpperCase();if(!tx(r[c.doc]))continue;
+    if(!/^[REA]$/.test(tip)){omitidas++;continue;}
+    const val=num(r[c.val]),bas=num(r[c.bas]);if(val==null)continue;
+    const con=tx(r[c.con]).toUpperCase(),pro=tx(r[c.pro]),cta12=SALUD_CONCEPTOS[con],cta=cta12?(ctaSaludAEstandar(cta12)||''):'',pre=tx(r[c.pre]),fac=tx(r[c.fac]);
+    out.push({fecha:_ymd(r[c.fec]),doc:String(tx(r[c.doc])).replace(/^0+(?=\d)/,''),docFactura:(pre&&fac?pre+' '+fac:pre+fac).trim(),cta,ctaOrig:cta12,nom:con?('CxP '+con):'',ter:/^\d+$/.test(pro)?pro:pro.toUpperCase(),terRaw:pro,terN:c.nom>=0?tx(r[c.nom]):'',desc:'',cc:'',deb:0,cre:val,base:bas!=null&&bas!==0?bas:null,ret:val,concepto:con,tipoCxp:tip,fuente:c.fue>=0?tx(r[c.fue]):'',anio:c.ano>=0?tx(r[c.ano]):'',mes:c.mes>=0?tx(r[c.mes]):''});}
+  if(!out.length)return{err:'No encontré retenciones (tipos R, E o A) en el módulo de cuentas por pagar.'};
+  return{rows:out,hasBase:true,moduloCxp:true,omitidas,formato:'módulo de cuentas por pagar del software de salud (base real, fecha y factura de cada retención; se une con el movimiento)'};
+}
+/* Une el módulo con el movimiento (en copias): a cada línea de retención se le agrega la base real, la fecha y la factura de su fila del módulo (mismo documento, mismo NIT y mismo valor ±1). El resto de líneas (nómina, ajustes) queda como está. */
+function enriquecerSalud(o){
+  const led=o&&o.led,det=o&&o.det;if(!(det&&det.moduloCxp&&det.rows&&led&&led.rows))return{led,det,info:{}};
+  const fam=c=>/^2367/.test(c)?'E':/^2368/.test(c)?'A':/^2365/.test(c)?'R':null,clave=(d,t,f)=>d+'|'+String(t).toUpperCase()+'|'+f,idx=new Map();
+  det.rows.forEach((r,i)=>{const k=clave(r.doc,r.ter,r.tipoCxp);if(!idx.has(k))idx.set(k,[]);idx.get(k).push(i);});
+  const usados=new Set();let unidas=0,sin=0;
+  const rows=led.rows.map(r=>{const f=fam(r.cta);if(!f||r.pago||!(r.cre>0)||r.deb>0)return r;
+    const j=(idx.get(clave(r.doc,r.ter,f))||[]).find(x=>!usados.has(x)&&Math.abs(det.rows[x].ret-r.cre)<=1);if(j==null){sin++;return r;}
+    usados.add(j);unidas++;const m=det.rows[j];return Object.assign({},r,{base:m.base,baseEstimada:undefined,fecha:m.fecha||r.fecha,docFactura:m.docFactura,conceptoCxp:m.concepto,cxp:true});});
+  const info={cxpFilas:det.rows.length,cxpUnidas:unidas,cxpLineasSinModulo:sin,cxpFilasSinLinea:det.rows.length-usados.size};
+  return{led:Object.assign({},led,{rows,hasBase:true,baseEstimada:rows.some(r=>r.baseEstimada)}),det:null,info};
+}
+function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const ms=parseMovimientoSalud(rows);if(!ms.err)return ms;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
 function parseLedgerEstandar(rows){
   const h=findHeader(rows,c=>c.some(x=>x.startsWith('documento'))&&c.some(x=>x.startsWith('cuenta'))&&((c.some(x=>x.startsWith('debito'))&&c.some(x=>x.startsWith('credito')))||c.some(x=>x.startsWith('retencion'))));
   if(!h)return{err:'No encontré el encabezado (Documento, Cuenta y Débito/Crédito o Retención).'};
@@ -2199,6 +2278,7 @@ function ruleOportunidad(ctx){
     return{Documento:r.doc,'Fecha del pago':f||'sin fecha','Vencimiento':ctx.vencePrev,Valor:r.deb,Resultado:d==null?'Sin fecha':d>0?d+' día(s) de retraso':d===0?'Último día del plazo':(-d)+' día(s) antes'};});
   const tarde=rows.filter(r=>/retraso/.test(r.Resultado));const cols=['Documento','Fecha del pago','Vencimiento','Valor','Resultado'];
   if(tarde.length)return R('oportunidad',t,'err',tarde.length+' pago(s) posterior(es) al vencimiento ('+ctx.vencePrev+'): puede generar sanción e intereses por extemporaneidad.',cols,rows);
+  if(rows.every(r=>r.Resultado==='Sin fecha')&&P.every(r=>!r.fecha)&&ctx.led.rows.some(r=>r.anio&&r.mes))return NA('oportunidad',t,'Este movimiento solo trae el año y el mes de cada asiento (no el día), así que no se puede comparar la fecha del pago con el vencimiento. Revisa la fecha del pago en el recibo o en el extracto bancario.');
   if(rows.some(r=>r.Resultado==='Sin fecha'))return R('oportunidad',t,'warn','Algún pago no trae fecha legible.',cols,rows);
   const ult=rows.some(r=>r.Resultado==='Último día del plazo');
   return R('oportunidad',t,'ok','El pago se hizo dentro del plazo (vencimiento '+ctx.vencePrev+')'+(ult?', el último día.':'.'),cols,rows);
@@ -2206,7 +2286,7 @@ function ruleOportunidad(ctx){
 
 /* ########## SECCIÓN 7 · Persona natural o jurídica ########## */
 /* ===== Persona natural / jurídica ===== */
-const PJ_RE=/\b(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA|LIMITADA|E\.?\s?S\.?\s?P\.?|INC|LLC|CORP|CORPORACI[OÓ]N|FUNDACI[OÓ]N|ASOCIACI[OÓ]N|COOPERATIVA|UNIVERSIDAD|GMBH|B\.?V\.?|S\.?\s?EN\s?C|UNION TEMPORAL|CONSORCIO|SOCIEDAD|COMPA[ÑN][IÍ]A)\b/i;
+const PJ_RE=/\b(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA?|LIMITADA|LIMITED|PLC|S\.?R\.?L|E\.?\s?S\.?\s?P\.?|INC|LLC|CORP|CORPORACI[OÓ]N|FUNDACI[OÓ]N|ASOCIACI[OÓ]N|COOPERATIVA|UNIVERSIDAD|GMBH|B\.?V\.?|S\.?\s?EN\s?C|UNION TEMPORAL|CONSORCIO|SOCIEDAD|COMPA[ÑN][IÍ]A)\b/i;
 function tipoPersona(r,ov){
   const k=r.ter||'';
   if(ov&&ov[k])return{t:ov[k],why:'excepción del cliente'};
@@ -2438,6 +2518,12 @@ function rulePago(ctx){
   const pagos=fijada?ctx.bal.filter(b=>b.cta===ctx.client.ctaPago):ctx.bal.filter(b=>/^2365/.test(b.cta)&&b.cta.length===6&&conceptoCuenta(ctx.rules,b.cta,b.nom)==='PAGO DIAN');
   const cuentaPago=pagos.map(b=>b.cta).join(', ')||ctx.client.ctaPago||'236575';
   const pagoRow={deb:pagos.reduce((s,b)=>s+b.deb,0)};
+  const pagosLed=((ctx.led&&ctx.led.rows)||[]).filter(r=>r.pago);
+  if(!pagos.length&&pagosLed.length){   // el pago es un débito de cada cuenta de retención: se suma lo que el movimiento identifica como pago a la DIAN y se compara con el saldo anterior de 2365 y 2367
+    const pg=pagosLed.reduce((s,r)=>s+r.deb,0),sa2=-leafs(ctx.bal,'2365').concat(leafs(ctx.bal,'2367')).reduce((s,a)=>s+a.sa,0),dif2=pg-sa2;
+    const rows2=[{Concepto:'Saldo anterior de 2365 y 2367 (por pagar)',Valor:sa2},{Concepto:'Pagos a la DIAN en el mes (débitos a la DIAN en el movimiento)',Valor:pg},{Concepto:'Diferencia',Valor:dif2}];
+    if(Math.abs(dif2)>ctx.tol)return R('pago',t,'warn','El pago registrado difiere del saldo anterior en $'+fm(dif2)+'. Revisa el recibo de pago (pago parcial, extemporáneo o saldo pendiente).',['Concepto','Valor'],rows2);
+    return R('pago',t,'ok','El pago a la DIAN ($'+fm(pg)+') cubre el saldo anterior de las cuentas 2365 y 2367.',['Concepto','Valor'],rows2);}
   if(!pagos.length)return NA('pago',t,'No encontré en el balance la cuenta de pago a la DIAN (por defecto 236575, o la que se llame «… a pagar»). Ajusta la cuenta en el perfil del cliente.');
   const sa=-leafs(ctx.bal,'2365').reduce((s,a)=>s+a.sa,0);
   const dif=pagoRow.deb-sa;
@@ -2496,8 +2582,8 @@ function ruleCuadre(ctx){
       for(const ty of['PJ','PN']){const lr=(bk[c]&&bk[c][ty].r)||0,lb=(bk[c]&&bk[c][ty].b)||0;
         const fr=ty==='PJ'?(f.pjRet||0):(f.pnRet||0),fb=ty==='PJ'?(f.pjBase||0):(f.pnBase||0);
         if(!lr&&!fr&&!(hayBase&&(lb||fb)))continue;
-        const d=fr-lr,db=hayBase&&c!=='AUTORRETENCIONES'?fb-lb:0;/* la base de la autorretención se valida contra los ingresos (cuenta 41 y DIAN) */const bad=Math.abs(d)>ctx.tol||Math.abs(db)>ctx.tol;if(bad)errTipo++;
-        extra.push({Concepto:c+' · '+(ty==='PJ'?'personas jurídicas':'personas naturales'),Libros:lr,Formulario:fr,Diferencia:d,Estado:bad?'Revisar':'OK',Nota:'','Base libros':hayBase?lb:'','Base formulario':fb,'Dif. base':hayBase?db:''});}}
+        const sinBaseLibros=lr>0&&lb===0,d=fr-lr,db=hayBase&&c!=='AUTORRETENCIONES'&&!sinBaseLibros?fb-lb:0;/* la base de la autorretención se valida contra los ingresos (cuenta 41 y DIAN); si los libros no traen la base de este concepto (p. ej. salarios), solo se compara la retención */const bad=Math.abs(d)>ctx.tol||Math.abs(db)>ctx.tol;if(bad)errTipo++;
+        extra.push({Concepto:c+' · '+(ty==='PJ'?'personas jurídicas':'personas naturales'),Libros:lr,Formulario:fr,Diferencia:d,Estado:bad?'Revisar':'OK',Nota:hayBase&&sinBaseLibros&&fb?'Los libros no traen la base de este concepto: solo se compara la retención.':'','Base libros':hayBase?lb:'','Base formulario':fb,'Dif. base':hayBase?db:''});}}
     rows.push(...extra,tot);
   }else if(split&&!L)sinTipo=true;
   const nt=sinTipo?' Para validar jurídicas y naturales carga el auxiliar de retenciones o el movimiento.':'';
@@ -2506,6 +2592,8 @@ function ruleCuadre(ctx){
   if(pend)return cuadreR(t,'warn','Lo declarado coincide con el movimiento del mes, pero el saldo final no cuadra porque incluye retenciones del período anterior sin pagar.'+resumenPend+(split&&L?' Por jurídicas y naturales cuadra.':'')+nt+note,cols,rows);
   return cuadreR(t,'ok','Todos los conceptos cuadran con el saldo final de libros'+(split&&L?', incluso por jurídicas y naturales':'')+'.'+nt+note,cols,rows);
 }
+/* Lo pagado a la DIAN con cargo a una cuenta de retención (en el software de salud el pago es un débito de la misma cuenta; el movimiento lo identifica) */
+function pagadoEnCuenta(ctx,cta){let s=0;for(const r of (ctx.led&&ctx.led.rows)||[])if(r.pago&&r.ctaPagada===cta)s+=r.deb;return s;}
 function ruleIva(ctx){
   const t='Retención de IVA (casillas 131 a 134) contra libros';
   if(!ctx.bal)return NA('iva',t,'Falta cargar el balance.');
@@ -2517,7 +2605,7 @@ function ruleIva(ctx){
   }
   const lib={c131:0,c132:0,c133:0};
   for(const a of leafs(ctx.bal,'2367')){const rl=ruleFor(ctx.rules,a.cta);const c=rl?rl.c:'IVA 131';
-    if(a.cre)lib[c==='IVA 132'?'c132':'c131']+=a.cre;if(a.deb)lib.c133+=a.deb;}
+    if(a.cre)lib[c==='IVA 132'?'c132':'c131']+=a.cre;const dd=a.deb-pagadoEnCuenta(ctx,a.cta);if(dd>0)lib.c133+=dd;}
   const fc={c131:d.c131||0,c132:d.c132||0,c133:d.c133||0};
   const rows=[];let err=0;
   const add=(n,l,fo)=>{const x=fo-l;const bad=Math.abs(x)>ctx.tol;if(bad)err++;rows.push({Casilla:n,Libros:l,Formulario:fo,Diferencia:x,Estado:bad?'Revisar':'OK'});};
@@ -2547,7 +2635,8 @@ function lineSource(ctx){
 function ruleTarifa(ctx){
   const t='Tarifa aplicada vs. tarifa de la cuenta';
   const L=lineSource(ctx);if(!L)return NA('tarifa',t,'Falta el movimiento o el detalle de retenciones.');
-  const withBase=L.filter(r=>r.base!=null&&r.base!==0&&r.a!==0);
+  const conBaseEst=L.filter(r=>r.base!=null&&r.base!==0&&r.a!==0&&r.baseEstimada).length,withBase=L.filter(r=>r.base!=null&&r.base!==0&&r.a!==0&&!r.baseEstimada);
+  if(!withBase.length&&conBaseEst)return NA('tarifa',t,'Este reporte no trae la base: la app la estimó dividiendo la retención entre la tarifa de la cuenta, así que comparar la tarifa con ella sería comparar la retención consigo misma. Carga el auxiliar con base real (por ejemplo, el de cuentas por pagar) para validar tarifas.');
   if(!withBase.length)return NA('tarifa',t,'El reporte de retenciones no trae la base de cada retención. Carga el «Auxiliar de retenciones con base» para validar tarifas y bases mínimas.');
   const rows=[];const especial={};let rev=0;   // rev: cuántas líneas se compararon de verdad (solo las que traen el porcentaje en el nombre de su cuenta)
   String(ctx.client.tarifaEsp||'').split(/\n/).forEach(l=>{const[n,t]=l.split('|');const k=digits(n);const v=parseFloat(String(t||'').replace('%','').replace(',','.'));if(k&&!isNaN(v))especial[k]=v/100;});
@@ -2598,6 +2687,7 @@ function ruleDup(ctx){
   for(const r of L){if(r.a<=0||!r.ter)continue;const k=r.ter+'|'+r.cta+'|'+(r.base!=null&&r.base>0?'b'+Math.round(r.base):'r'+Math.round(r.a));(g[k]=g[k]||[]).push(r);}
   const rows=[];
   for(const k in g){const arr=g[k];if(new Set(arr.map(x=>x.doc)).size<2)continue;
+    const fac=arr.map(x=>x.docFactura||'');if(fac.every(Boolean)&&new Set(fac).size===arr.length)continue;   // el módulo de cuentas por pagar trae el número de cada factura: facturas distintas no son un duplicado
     for(const r of arr)rows.push({Tercero:r.terN||r.ter,Documento:r.doc,Cuenta:r.cta,Base:r.base,Retención:r.a});}
   const cols=['Tercero','Documento','Cuenta','Base','Retención'];
   return rows.length?R('dup',t,'warn',rows.length+' líneas comparten tercero, cuenta y valor en documentos distintos. Confirma que no se causaron dos veces.',cols,rows):R('dup',t,'ok','No encontré líneas repetidas entre documentos.');
@@ -2744,7 +2834,7 @@ function ruleBaseDian(ctx){
   const conBase=L.filter(r=>r.base!=null&&r.a!==0);
   if(!conBase.length)return NA('basedian',t,'Las líneas del reporte de retenciones no traen la base. Carga el reporte de retenciones con base para cruzarlo con la DIAN.');
   const docs=new Map();
-  for(const r of conBase){const k=keyDoc(r.doc)+'|'+r.ter;const o=docs.get(k)||{doc:r.doc,key:keyDoc(r.doc),ter:r.ter,terN:r.terN||r.ter,base:0,ret:0,ctas:new Set(),usado:false};o.base+=r.base;o.ret+=r.a;o.ctas.add(r.cta);docs.set(k,o);}
+  for(const r of conBase){const k=keyDoc(r.doc)+'|'+r.ter;const o=docs.get(k)||{doc:r.doc,fac:r.docFactura||'',key:keyDoc(r.doc),ter:r.ter,terN:r.terN||r.ter,base:0,ret:0,ctas:new Set(),usado:false};o.base+=r.base;o.ret+=r.a;o.ctas.add(r.cta);docs.set(k,o);}
   const porTer={};for(const o of docs.values())(porTer[o.ter]=porTer[o.ter]||[]).push(o);
   const ex=new Set(String(ctx.client.exentos||'').split(/\n/).map(s=>digits(s.split('|')[0])).filter(Boolean));
   const ms=(ctx.rules||[]).filter(r=>r.m>0).map(r=>r.m),minBase=(ms.length?Math.min(...ms):0)*(ctx.uvt||0);
@@ -2760,7 +2850,7 @@ function ruleBaseDian(ctx){
   for(const r of ds)items.push({origen:'Documento soporte',r,ter:r.nitR,nom:r.nomR,id:r.pref+r.folio,base:dianBase(r),ds:true});
   // 1) enlace exacto: documento soporte por consecutivo; factura por el número de factura dentro del documento contable
   for(const it of items){const cand=porTer[it.ter]||[];
-    const o=it.ds?docs.get(keyDoc(it.id)+'|'+it.ter):cand.find(z=>!z.usado&&numDoc(z.doc)&&numDoc(z.doc)===numDoc(it.r.folio));
+    const o=it.ds?docs.get(keyDoc(it.id)+'|'+it.ter):cand.find(z=>!z.usado&&((numDoc(z.doc)&&numDoc(z.doc)===numDoc(it.r.folio))||(z.fac&&numDoc(z.fac)===numDoc(it.r.folio))));
     if(o&&!o.usado){it.o=o;o.usado=true;it.via='número de documento';}}
   // 2) lo que queda se enlaza por tercero y base
   for(const it of items){if(it.o)continue;const o=(porTer[it.ter]||[]).find(z=>!z.usado&&Math.abs(z.base-it.base)<=ctx.tol);if(o){it.o=o;o.usado=true;it.via='tercero y base';}}
@@ -3015,7 +3105,7 @@ function ruleClasif(ctx){
 const BIM_MESES={1:[1,2],2:[3,4],3:[5,6],4:[7,8],5:[9,10],6:[11,12]};
 function bimInfo(id){const m=String(id||'').match(/^(\d{4})-B([1-6])$/);if(!m)return null;const n=+m[2],anio=+m[1],mf=BIM_MESES[n][1];
   return{n,anio,mesIni:BIM_MESES[n][0],mesFin:mf,fin:anio+'-'+String(mf).padStart(2,'0'),prevId:n===1?(anio-1)+'-B6':anio+'-B'+(n-1)};}
-function tarifaMil(nom){const m=String(nom||'').match(/(\d+(?:[.,]\d+)?)\s*(?:\*|\/)\s*1000/);return m?parseFloat(m[1].replace(',','.')):null;}
+function tarifaMil(nom){const m=String(nom||'').match(/(\d+(?:[.,]\d+)?)\s*(?:(?:\*|\/)\s*1000|x\s*mil\b|por\s*mil\b|‰)/i);return m?parseFloat(m[1].replace(',','.')):null;}   // «8.66*1000» (SIIGO), «4.14 X MIL» (software de salud) o «9,66 por mil»
 const F131=['BR','RP','DR','BH','VS','HA','VP','IM','TP'];
 const F131_TXT={BR:'6 · Base de la retención',RP:'7 · Total de retenciones practicadas en el período',DR:'8 · Descuento por devolución de retenciones',BH:'9 · Total de retenciones a declarar (7 − 8)',VS:'10 · Sanciones',HA:'11 · Total saldo a cargo (9 + 10)',VP:'12 · Valor a pagar',IM:'13 · Intereses de mora',TP:'14 · Total a pagar (12 + 13)'};
 const MES3_ISO={ENE:1,FEB:2,MAR:3,ABR:4,MAY:5,JUN:6,JUL:7,AGO:8,SEP:9,SEPT:9,OCT:10,NOV:11,DIC:12};
@@ -3116,7 +3206,7 @@ function ricaLineas(ctx){
       return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,tarifa:t,estimada:false,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
   if(ctx.led&&ctx.led.rows){
     return ctx.led.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.cre-r.deb;
-      return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:t?a/(t/1000):null,ret:a,tarifa:t,estimada:true,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
+      const real=r.cxp&&r.base!=null;return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:real?r.base:(t?a/(t/1000):null),ret:a,tarifa:t,estimada:!real,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
   return null;
 }
 function ricaTotal(lines){return lines.reduce((s,x)=>s+x.base,0);}
@@ -4015,6 +4105,7 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
 const autoBases=(rows,fam)=>{let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
+  if(x.err){const mc=parseModuloCxp(rows);if(!mc.err)x=mc;}   // módulo de cuentas por pagar del software de salud (base real, fecha y factura)
   if(x.err){const ib=parseInformeBasesBloques(rows);if(!ib.err)x=ib;}   // informe de bases por tarifa (no trae el NIT: se completa con el movimiento)
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
@@ -13343,7 +13434,7 @@ function xVerif(wb,d){
   for(const x of L){
     const fl=(d.flags&&d.flags[x.doc+'|'+x.cta])||[],dian=(d.dianObs&&d.dianObs[x.doc+'|'+x.cta+'|'+x.ter])||null;   // dian: lo que dice el cruce de la línea con la DIAN (recibidos y documentos soporte)
     const fIso=x.fechaIso||fechaISO(x.fecha);
-    ws.getCell(r,1).value=x.cta+' - '+x.nom;ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=fIso?isoDate(fIso):null;ws.getCell(r,3).numFmt='dd/mm/yyyy';ws.getCell(r,4).value=x.concepto;ws.getCell(r,5).value=x.tipo;
+    ws.getCell(r,1).value=(x.ctaOrig||x.cta)+' - '+x.nom;ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=fIso?isoDate(fIso):null;ws.getCell(r,3).numFmt='dd/mm/yyyy';ws.getCell(r,4).value=x.concepto;ws.getCell(r,5).value=x.tipo;
     ws.getCell(r,6).value=x.terRaw||x.ter;ws.getCell(r,7).value=x.terN;
     ws.getCell(r,8).value=x.base==null?null:x.base;ws.getCell(r,9).value=x.ret;
     ws.getCell(r,10).value={formula:`IFERROR(I${r}/H${r},"")`};
@@ -13604,7 +13695,7 @@ function retLines(ctx){
     const a=r.ret!=null?r.ret:(r.cre-r.deb);const rl=ruleFor(ctx.rules,r.cta);
     // los rubros de IVA solo se usan en la cuenta 2367: casilla 131 «RTE IVA» y casilla 132 «NO RESIDENTES»
     const concepto=r.cta.startsWith('2367')?(rl&&rl.c==='IVA 132'?'NO RESIDENTES':'RTE IVA'):(conceptoCuenta(ctx.rules,r.cta,r.nom)==='AUTORRETENCIONES'?'AUTORRETENCIONES':(rl?rl.c:''));
-    return{cta:r.cta,nom:r.nom,doc:r.doc,concepto,tipo:tipoPersona(r,ov).t,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,fechaIso:fechaDeLinea(r,FD)};});
+    return{cta:r.cta,nom:r.nom,doc:r.doc,concepto,tipo:tipoPersona(r,ov).t,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,fechaIso:fechaDeLinea(r,FD),ctaOrig:r.ctaOrig};});
   out.sort((a,b)=>a.cta<b.cta?-1:a.cta>b.cta?1:(a.doc<b.doc?-1:a.doc>b.doc?1:0));return out;
 }
 function flagsDe(results){
@@ -14307,7 +14398,7 @@ async function loadSlot(k,files,opc){
     else if(tipoMovimientoConocido(all)){DD[k]={names,err:rechazoPorFormato(k,all)};return;}   // trae rótulos como «SALARIOS» o «SERVICIOS» y el lector de respaldo lo confundía con el formulario
     else{r=parseForm(all.map(s=>s.rows));if(!r.err){S.form=Object.assign({},r.form);S.auto={};S.cas=casDesdeForm(S.form,{});S.ivaC=r.ivaC?Object.assign({},r.ivaC):{c131:r.iva,c132:null,c133:null};syncIva();}}}
   if(r.err&&['bal','led','det','dian'].includes(k)&&all.length){const q=identificarArchivo(all.map(s=>s.rows),k,sw);if(q){DD[k]={names,err:mt('LEC-TIP-001',{parece:q.parece,esperado:QUE_ES[k],espacio:q.espacio})};return;}}
-  if(k==='bal'&&!r.err&&tipoMovimientoConocido(all)){DD[k]={names,err:rechazoPorFormato(k,all)};return;}   // un movimiento repite el código de cuenta en cada línea y el lector de balance lo aceptaba con un aviso
+  if(k==='bal'&&!r.err&&(tipoMovimientoConocido(all)||{}).slot&&(tipoMovimientoConocido(all)||{}).slot!=='bal'){DD[k]={names,err:rechazoPorFormato(k,all)};return;}   // un movimiento no es un balance; el balance en su propia casilla se acepta   // un movimiento repite el código de cuenta en cada línea y el lector de balance lo aceptaba con un aviso
   if(r.err){DD[k]={names,err:r.err};return;}
   if(k==='det'&&r.formato&&/^Anexo de retención/.test(r.formato)&&!r.corte){const pn=periodoEnNombre(names[0]);if(pn){r.corte=pn;r.corteTxt=periodoTxt(pn)+' (según el nombre del archivo)';}}   // el anexo no trae fechas
   const tipoCt=k==='bal'?'bal':(k==='led'||k==='det')?'led':k==='dian'?'dian':null;const ct=tipoCt?contrato(tipoCt,r):null;
@@ -14348,7 +14439,7 @@ function hasForm(){return Object.values(S.form).some(v=>v&&v.ret);}
 function buildCtx(){
   const c=cur(),d=S.data,g=k=>d[k]&&d[k].parsed;
   const sp=g('dian')?splitDian(g('dian'),S.period,c&&c.nit):null;
-  const nube=enriquecerNube({led:g('led'),det:g('det'),rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi});   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
+  const nube0=enriquecerNube({led:g('led'),det:g('det'),rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud=enriquecerSalud({led:nube0.led,det:nube0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
   const nubeInfo=Object.assign({},nube.info,{totalMov:nube.led&&nube.led.rows?nube.led.rows.length:0,totalBases:nube.det&&nube.det.rows?nube.det.rows.length:0,necesitaNit:!!(g('led')&&g('led').sinNit),necesitaCta:!!(g('det')&&g('det').sinCuenta)});
   const uvtL=uvtLista(),uvtP=uvtEfectiva(uvtL,+String(S.period||'').slice(0,4)||new Date().getFullYear(),c.uvtEspecial);   // UVT del año del período; si el cliente tiene una especial, esa
   return{client:c,period:S.period,meta:pdata().meta,tol:+c.tol||1000,uvt:uvtP.valor,uvtInfo:uvtP,uvtLista:uvtL,rules:c.rules,
@@ -14357,7 +14448,7 @@ function buildCtx(){
 function prevP(p){const[y,m]=p.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function prevDecl(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const c=cur(),pp=c.periods[prevP(S.period)];return pp&&pp.declarado?pp.declarado.total:null;}
 function cierreManual(c,key){const p=c.periods&&c.periods[key];return p&&p.cierre&&p.cierre.fecha?p.cierre:null;}   // «Marcar como revisado»: coexiste con el Checklist, no lo reemplaza
-function rechazoPorFormato(k,all){const tm=tipoMovimientoConocido(all);if(!tm)return '';return mt('LEC-TIP-001',{parece:(tm.slot==='det'?QUE_ES.det:QUE_ES.led)+' ('+tm.parece+')',esperado:QUE_ES[k],espacio:tm.slot==='det'?ESPACIOS.det:ESPACIOS.led});}   // «parece X, no Y; cárgalo en Z»
+function rechazoPorFormato(k,all){const tm=tipoMovimientoConocido(all);if(!tm)return '';return mt('LEC-TIP-001',{parece:QUE_ES[tm.slot]+' ('+tm.parece+')',esperado:QUE_ES[k],espacio:ESPACIOS[tm.slot]});}   // «parece X, no Y; cárgalo en Z»
 let _aplCache=null;
 function aplFlags(){   // qué ítems condicionales del check list aplican con lo cargado ahora
   const rentas=(()=>{try{const sal=S.data.sal&&S.data.sal.parsed,nom=S.data.nom&&S.data.nom.parsed,form=hasForm()?S.form:null;if(aplicaRentasTrabajo({sal,nom,form}))return true;
@@ -15201,7 +15292,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega58';
+const APP_ENTREGA='fase4b-entrega60';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
