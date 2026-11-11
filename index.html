@@ -1717,8 +1717,55 @@ function parseLibroMayorSap(rows){
   if(!out.length)return{err:'No encontré movimientos en el libro mayor de SAP.'};
   return{rows:out,hasBase:conBase,formato:'libro mayor de SAP Business One'+(conBase?' (con base de impuesto)':'')};
 }
-const esLibroMayorSap=hojas=>(hojas||[]).some(h=>{try{return!parseLibroMayorSap(h.rows||h).err;}catch(e){return false;}});
-function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
+/* Movimiento contable con DOBLE código de cuenta (NIIF y local): tabla plana «FECHA · TIPODOC · NUMDOC · CUENTANIIF · NOMBRECUENTANIIF · CUENTALOCAL · NOMBRECUENTALOCAL · CONCEPTO · DEBITOS · CREDITOS · IDENTIDAD · VERIFICACION · NOMBRETERCERO …».
+   Se usa el código NIIF (es el del balance de ese programa); el local queda en ctaLocal. El documento es «TIPODOC NUMDOC» (p. ej. «FC 00003281»). La fecha viene como aaaa/mm/dd. */
+const _ymd=v=>{if(v==null||v==='')return '';if(typeof v==='number')return serialAFecha(v);const s=String(v).trim(),m=/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(s);return m?m[3].padStart(2,'0')+'/'+m[2].padStart(2,'0')+'/'+m[1]:s;};
+function parseMovimientoDobleCodigo(rows){
+  const nz=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]/g,'').toLowerCase();
+  let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,30)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    const cn=f('cuentaniif'),cl=f('cuentalocal'),deb=f('debitos'),cre=f('creditos'),td=f('tipodoc'),nd=f('numdoc'),fe=f('fecha');
+    if((cn>=0||cl>=0)&&deb>=0&&cre>=0&&td>=0&&nd>=0&&fe>=0){hi=i;c={fe,td,nd,cn,cl,nn:f('nombrecuentaniif'),nl:f('nombrecuentalocal'),con:f('concepto'),deb,cre,id:f('identidad'),dv:f('verificacion'),nt:f('nombretercero'),cc:f('codcentro'),cc2:f('centrocosto')};}}
+  if(hi<0)return{err:'No encontré el encabezado del movimiento (FECHA, TIPODOC, NUMDOC, CUENTANIIF o CUENTALOCAL, DEBITOS, CREDITOS).'};
+  const txt=v=>String(v==null?'':v).trim(),out=[];let pares=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],cn=c.cn>=0?txt(r[c.cn]).replace(/\s+/g,''):'',cl=c.cl>=0?txt(r[c.cl]).replace(/\s+/g,''):'',cta=/^\d{4,}$/.test(cn)?cn:cl;if(!/^\d{4,}$/.test(cta))continue;
+    const id=c.id>=0?txt(r[c.id]):'',dv=c.dv>=0?txt(r[c.dv]):'',doc=(txt(r[c.td])+' '+txt(r[c.nd])).trim().replace(/\s+/g,' ');if(/^\d{4,}$/.test(cl)&&cl!==cta)pares++;
+    out.push({fecha:_ymd(r[c.fe]),doc,cta,ctaLocal:/^\d{4,}$/.test(cl)?cl:'',nom:txt(r[c.nn>=0?c.nn:c.nl]),ter:digits(id),terRaw:id&&dv!==''?id+'-'+dv:id,terN:c.nt>=0?txt(r[c.nt]):'',desc:c.con>=0?txt(r[c.con]):'',cc:txt(r[c.cc>=0?c.cc:c.cc2]),deb:num(r[c.deb])||0,cre:num(r[c.cre])||0,base:null,ret:null});}
+  if(!out.length)return{err:'No encontré movimientos en el archivo.'};
+  return{rows:out,hasBase:false,formato:'movimiento con doble código de cuenta (NIIF y local)',ctaLocal:pares>0};
+}
+/* Informe de bases de impuestos por tarifa (programa contable): bloques «NOMBRE DEL IMPUESTO - Tarifa: x» con una línea por documento (documento, fecha, concepto, beneficiario, cuenta, débitos, créditos = retención, valor base)
+   y un total por bloque y general. Las celdas combinadas dejan los datos desalineados respecto del encabezado, así que cada línea se lee por el ORDEN de su contenido. No trae el NIT del tercero (solo su nombre) y su cuenta es el código local:
+   se completan desde el movimiento (enriquecerNube). El encabezado trae la empresa, su NIT y el período. */
+function parseInformeBasesBloques(rows){
+  const nz=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]/g,'').toLowerCase(),txt=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+  let hi=-1;for(let i=0;i<Math.min((rows||[]).length,40)&&hi<0;i++){const t=(rows[i]||[]).map(nz);if(['documento','fecha','concepto','beneficiario','cuenta','debitos','creditos','valorbase'].filter(k=>t.includes(k)).length>=7)hi=i;}
+  if(hi<0)return{err:'No encontré el encabezado del informe de bases (DOCUMENTO, FECHA, CONCEPTO, BENEFICIARIO, CUENTA, DÉBITOS, CRÉDITOS, VALOR BASE).'};
+  let empresa='',nit='',periodo='';
+  for(let i=0;i<hi;i++){for(const v of (rows[i]||[])){const s=txt(v);if(!s)continue;const mn=/Nit:?\s*([\d.,]+)\s*-\s*(\d)/i.exec(s);if(mn){nit=mn[1].replace(/[.,]/g,'')+'-'+mn[2];continue;}const mp=/\(de\s+(.+?)\s+a\s+(.+?)\)/i.exec(s);if(mp){periodo='del '+mp[1]+' al '+mp[2];continue;}if(!empresa&&!/informe/i.test(s))empresa=s;}}
+  const out=[],avisos=[];let bloque=null,sumB={deb:0,cre:0,base:0},general={deb:0,cre:0,base:0},ult=null,nBloques=0;
+  const cierra=(tot)=>{if(bloque&&tot&&(Math.abs(tot.deb-sumB.deb)>1||Math.abs(tot.cre-sumB.cre)>1||Math.abs(tot.base-sumB.base)>1))avisos.push('El total del bloque «'+bloque.nom+'» ('+Math.round(tot.cre)+' de retención, '+Math.round(tot.base)+' de base) no coincide con la suma de sus líneas ('+Math.round(sumB.cre)+' y '+Math.round(sumB.base)+').');};
+  for(let i=hi+1;i<rows.length;i++){const cel=(rows[i]||[]).map(v=>v===''||v==null?null:v).filter(v=>v!==null);if(!cel.length)continue;
+    const textos=cel.filter(v=>typeof v==='string').map(txt),nums=cel.filter(v=>typeof v==='number');
+    if(cel.length===1&&typeof cel[0]==='string'){const m=/^(.*?)\s*-\s*Tarifa:\s*([\d.,]+)\s*$/i.exec(txt(cel[0]));if(m){bloque={nom:m[1].trim(),tarifa:+String(m[2]).replace(',','.')};sumB={deb:0,cre:0,base:0};nBloques++;continue;}}
+    const tt=textos.find(s=>/^total\b/i.test(s));
+    if(tt){ult=/^total general/i.test(tt)?'general':'bloque';continue;}
+    if(!tt&&nums.length===3&&textos.length===0&&ult){const tot={deb:nums[0],cre:nums[1],base:nums[2]};if(ult==='bloque')cierra(tot);else if(Math.abs(tot.cre-general.cre)>1||Math.abs(tot.base-general.base)>1)avisos.push('El total general ('+Math.round(tot.cre)+' de retención, '+Math.round(tot.base)+' de base) no coincide con la suma de todas las líneas ('+Math.round(general.cre)+' y '+Math.round(general.base)+').');ult=null;continue;}
+    const iF=cel.findIndex(v=>typeof v==='string'&&/^\d{4}[\/-]\d{2}[\/-]\d{2}$/.test(txt(v)));if(iF<1||!bloque||nums.length<4)continue;
+    const doc=txt(cel[0]).replace(/\s+/g,' '),resto=cel.slice(iF+1),tx=resto.filter(v=>typeof v==='string').map(txt).filter(Boolean),nu=resto.filter(v=>typeof v==='number'),[ctaN,deb,cre,base]=nu.slice(-4);
+    if(!/^\d{4,}$/.test(String(ctaN)))continue;
+    out.push({fecha:_ymd(cel[iF]),doc,cta:String(ctaN),ctaLocal:String(ctaN),nom:bloque.nom,ter:'',terRaw:'',terN:tx.length>1?tx[tx.length-1]:'',desc:tx.length>1?tx.slice(0,-1).join(' '):(tx[0]||''),cc:'',deb:deb||0,cre:cre||0,base:base,ret:(cre||0)-(deb||0),tarifaBloque:bloque.tarifa});
+    sumB.deb+=deb||0;sumB.cre+=cre||0;sumB.base+=base||0;general.deb+=deb||0;general.cre+=cre||0;general.base+=base||0;ult=null;}
+  if(!out.length)return{err:'No encontré líneas con documento, fecha, cuenta y base en el informe de bases.'};
+  return{rows:out,hasBase:true,formato:'informe de bases de impuestos por tarifa (sin NIT del tercero: se completa con el movimiento)',sinNitDet:true,cuentaLocal:true,empresa,nitEmpresa:nit,periodoTxt:periodo,bloques:nBloques,avisos};
+}
+function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar con base de un formato conocido? (para decir a qué casilla va cuando se carga en otra)
+  for(const h of hojas||[]){const rows=h&&h.rows?h.rows:h;
+    try{if(!parseLibroMayorSap(rows).err)return{slot:'led',parece:'libro mayor de SAP Business One'};}catch(e){}
+    try{if(!parseMovimientoDobleCodigo(rows).err)return{slot:'led',parece:'movimiento con doble código de cuenta (NIIF y local)'};}catch(e){}
+    try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}}
+  return null;}
+function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
 function parseLedgerEstandar(rows){
   const h=findHeader(rows,c=>c.some(x=>x.startsWith('documento'))&&c.some(x=>x.startsWith('cuenta'))&&((c.some(x=>x.startsWith('debito'))&&c.some(x=>x.startsWith('credito')))||c.some(x=>x.startsWith('retencion'))));
   if(!h)return{err:'No encontré el encabezado (Documento, Cuenta y Débito/Crédito o Retención).'};
@@ -3884,7 +3931,7 @@ function validarContrato(tipo,r){
     const txt=mal+' de '+n+' filas no traen '+(campo==='fecha'||campo==='base'?'una ':'un ')+CONTRATO_ROTULO[campo]+' válid'+(campo==='fecha'||campo==='base'?'a':'o')+(ej!=null?' (por ejemplo «'+String(ej).slice(0,30)+'»)':'');
     (mal/n>CONTRATO_UMBRAL_ERROR?errores:avisos).push(txt);
   }
-  if(tipo==='led'&&!r.sinNit){   // defensa general: hay nombre de tercero pero casi ninguna identificación → probables columnas desplazadas (se pierde el tercero)
+  if(tipo==='led'&&!r.sinNit&&!r.sinNitDet){   // defensa general: hay nombre de tercero pero casi ninguna identificación → probables columnas desplazadas (se pierde el tercero)
     const conNombre=r.rows.filter(f=>f.terN!=null&&String(f.terN).trim()!=='').length,sinId=r.rows.filter(f=>f.terN!=null&&String(f.terN).trim()!==''&&!String(f.ter==null?'':f.ter).trim()).length;
     if(conNombre>=5&&sinId/conNombre>0.5)avisos.push('en '+sinId+' de '+conNombre+' filas con nombre de tercero falta su identificación: puede que las columnas del archivo estén desplazadas y se esté perdiendo el tercero');
   }
@@ -3964,6 +4011,7 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
 const autoBases=(rows,fam)=>{let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
+  if(x.err){const ib=parseInformeBasesBloques(rows);if(!ib.err)x=ib;}   // informe de bases por tarifa (no trae el NIT: se completa con el movimiento)
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
 function leerMovimiento(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'movimiento','un movimiento',rows,parseLedger):parseLedger(rows);}
@@ -12297,8 +12345,8 @@ function normTercero(s){let t=String(s==null?'':s).normalize('NFD').replace(/[\u
    · la cuenta contable de cada base del informe de impuestos: la cuenta 2365 del mismo comprobante cuyo valor coincide con la retención (o, si hay varias, la que lleva el mismo % en su nombre). */
 function enriquecerNube(o){
   const led=o&&o.led,det=o&&o.det,info={nitPorComprobante:0,nitPorNombre:0,sinNit:0,basesConCuenta:0,basesSinCuenta:0,hizo:false};
-  const necesitaNit=!!(led&&led.sinNit&&led.rows),necesitaCta=!!(det&&det.sinCuenta&&det.rows);
-  if(!necesitaNit&&!necesitaCta)return{led,det,info};
+  const necesitaNit=!!(led&&led.sinNit&&led.rows),necesitaCta=!!(det&&det.sinCuenta&&det.rows),detSinNit=!!(det&&det.sinNitDet&&det.rows&&led&&led.rows),detLocal=!!(det&&det.cuentaLocal&&det.rows&&led&&led.rows&&led.rows.some(r=>r.ctaLocal&&r.ctaLocal!==r.cta));   // los pares se toman de las filas: la marca del lector no sobrevive al guardado de la casilla
+  if(!necesitaNit&&!necesitaCta&&!detSinNit&&!detLocal)return{led,det,info};
   let led2=led,det2=det;
   if(necesitaNit){
     const porDoc=new Map(),porNom=new Map();const agrega=(nit,nom)=>{const k=normTercero(nom),n=digits(nit);if(!k||!n)return;if(!porNom.has(k))porNom.set(k,new Set());porNom.get(k).add(n);};
@@ -12322,6 +12370,15 @@ function enriquecerNube(o){
       info.basesSinCuenta++;return Object.assign({},r,{cta:'2365',impuesto:r.nom});})});   // sin la cuenta: se queda en la cuenta general 2365 con el nombre del impuesto (así no se pierde la base ni su %)
     info.hizo=true;
   }
+  if(detSinNit||detLocal){   // informe de bases de otro programa: sin NIT del tercero y con el código local de la cuenta
+    const porDoc=new Map(),porNom=new Map(),loc=new Map();
+    for(const r of led.rows){if(r.doc&&r.ter&&!porDoc.has(r.doc))porDoc.set(r.doc,{ter:r.ter,terRaw:r.terRaw});const k=normTercero(r.terN);if(k&&r.ter){if(!porNom.has(k))porNom.set(k,new Set());porNom.get(k).add(r.ter);}if(r.ctaLocal&&r.cta&&r.ctaLocal!==r.cta&&!loc.has(r.ctaLocal))loc.set(r.ctaLocal,r.cta);}
+    info.detNitPorComprobante=0;info.detNitPorNombre=0;info.detSinNit=0;info.detCuentasNiif=0;
+    det2=Object.assign({},det2||det,{rows:(det2||det).rows.map(r=>{let o=r;
+      if(detSinNit&&!r.ter){const d=porDoc.get(r.doc);if(d){info.detNitPorComprobante++;o=Object.assign({},o,{ter:d.ter,terRaw:d.terRaw||d.ter,terInferido:'comprobante'});}
+        else{const s=porNom.get(normTercero(r.terN));if(s&&s.size===1){info.detNitPorNombre++;const n=[...s][0];o=Object.assign({},o,{ter:n,terRaw:n,terInferido:'nombre'});}else info.detSinNit++;}}
+      if(detLocal&&loc.has(r.cta)){info.detCuentasNiif++;o=Object.assign({},o,{cta:loc.get(r.cta)});}
+      return o;})});info.hizo=true;}
   return{led:led2,det:det2,info};
 }
 /* ########## SECCIÓN 19 · Reporte de retenciones por cuenta y tercero, sin documento ########## */
@@ -14242,10 +14299,10 @@ async function loadSlot(k,files,opc){
     r=parseForm350Casillas(all.map(s=>s.rows));
     if(!r.err){S.form=Object.assign({},r.form);S.auto=Object.assign({},r.auto||{});S.cas=Object.assign({},r.map||{});S.ivaC=Object.assign({},r.ivaC);S.ex=Object.assign({},r.ex);syncIva();r.viaCasillas=true;}
     else if(all.some(s=>{const y=parseInformeComprasRet(s.rows);return !y.err||y.informe;})){DD[k]={names,err:mt('LEC-TIP-001',{parece:QUE_ES.det,esperado:QUE_ES.form,espacio:ESPACIOS.det})};return;}   // el informe de compras con retenciones (SAP) trae rótulos como «Compras» u «Honorarios» y el lector de respaldo lo confundía con el formulario
-    else if(esLibroMayorSap(all)){DD[k]={names,err:mt('LEC-TIP-001',{parece:QUE_ES.led+' (libro mayor de SAP Business One)',esperado:QUE_ES.form,espacio:ESPACIOS.led})};return;}   // trae rótulos como «SALARIOS» o «SERVICIOS» y el lector de respaldo lo confundía con el formulario
+    else if(tipoMovimientoConocido(all)){DD[k]={names,err:rechazoPorFormato(k,all)};return;}   // trae rótulos como «SALARIOS» o «SERVICIOS» y el lector de respaldo lo confundía con el formulario
     else{r=parseForm(all.map(s=>s.rows));if(!r.err){S.form=Object.assign({},r.form);S.auto={};S.cas=casDesdeForm(S.form,{});S.ivaC=r.ivaC?Object.assign({},r.ivaC):{c131:r.iva,c132:null,c133:null};syncIva();}}}
   if(r.err&&['bal','led','det','dian'].includes(k)&&all.length){const q=identificarArchivo(all.map(s=>s.rows),k,sw);if(q){DD[k]={names,err:mt('LEC-TIP-001',{parece:q.parece,esperado:QUE_ES[k],espacio:q.espacio})};return;}}
-  if(k==='bal'&&!r.err&&esLibroMayorSap(all)){DD[k]={names,err:mt('LEC-TIP-001',{parece:QUE_ES.led+' (libro mayor de SAP Business One)',esperado:QUE_ES.bal,espacio:ESPACIOS.led})};return;}   // un movimiento repite el código de cuenta en cada línea y el lector de balance lo aceptaba con un aviso
+  if(k==='bal'&&!r.err&&tipoMovimientoConocido(all)){DD[k]={names,err:rechazoPorFormato(k,all)};return;}   // un movimiento repite el código de cuenta en cada línea y el lector de balance lo aceptaba con un aviso
   if(r.err){DD[k]={names,err:r.err};return;}
   if(k==='det'&&r.formato&&/^Anexo de retención/.test(r.formato)&&!r.corte){const pn=periodoEnNombre(names[0]);if(pn){r.corte=pn;r.corteTxt=periodoTxt(pn)+' (según el nombre del archivo)';}}   // el anexo no trae fechas
   const tipoCt=k==='bal'?'bal':(k==='led'||k==='det')?'led':k==='dian'?'dian':null;const ct=tipoCt?contrato(tipoCt,r):null;
@@ -14295,6 +14352,7 @@ function buildCtx(){
 function prevP(p){const[y,m]=p.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function prevDecl(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const c=cur(),pp=c.periods[prevP(S.period)];return pp&&pp.declarado?pp.declarado.total:null;}
 function cierreManual(c,key){const p=c.periods&&c.periods[key];return p&&p.cierre&&p.cierre.fecha?p.cierre:null;}   // «Marcar como revisado»: coexiste con el Checklist, no lo reemplaza
+function rechazoPorFormato(k,all){const tm=tipoMovimientoConocido(all);if(!tm)return '';return mt('LEC-TIP-001',{parece:(tm.slot==='det'?QUE_ES.det:QUE_ES.led)+' ('+tm.parece+')',esperado:QUE_ES[k],espacio:tm.slot==='det'?ESPACIOS.det:ESPACIOS.led});}   // «parece X, no Y; cárgalo en Z»
 let _aplCache=null;
 function aplFlags(){   // qué ítems condicionales del check list aplican con lo cargado ahora
   const rentas=(()=>{try{const sal=S.data.sal&&S.data.sal.parsed,nom=S.data.nom&&S.data.nom.parsed,form=hasForm()?S.form:null;if(aplicaRentasTrabajo({sal,nom,form}))return true;
@@ -15138,7 +15196,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega56';
+const APP_ENTREGA='fase4b-entrega57';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
