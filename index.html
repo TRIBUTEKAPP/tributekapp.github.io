@@ -3103,16 +3103,20 @@ function ricaLibros(ctx){
   // neto = saldo final de las cuentas de retención (sin la cuenta de pago), crédito en positivo; saldo = saldo final de todas las cuentas 2368.
   return{L,ret,pg,cre:sum(ret,'cre'),deb:sum(ret,'deb'),neto:-sum(ret,'sf'),saldo:-sum(L,'sf'),saldoAnt:-sum(L,'sa'),pagoDeb:pg?pg.deb:0,saldoAntPago:pg?-pg.sa:0};
 }
+/* Fecha de cada documento: la de su propia línea y, si el reporte no la trae (p. ej. un auxiliar de retenciones sin fechas), la del movimiento o del otro reporte con el mismo documento */
+const claveDoc=d=>String(d==null?'':d).replace(/\s+/g,'').toUpperCase();
+function mapaFechasDoc(ctx){const m=new Map();for(const src of [ctx&&ctx.led,ctx&&ctx.det])for(const r of (src&&src.rows)||[]){if(!r.doc)continue;const k=claveDoc(r.doc);if(m.has(k))continue;const f=fechaISO(r.fecha);if(f)m.set(k,f);}return m;}
+function fechaDeLinea(r,mapa){return fechaISO(r.fecha)||(mapa&&mapa.get(claveDoc(r.doc)))||null;}
 function ricaLineas(ctx){
-  const pago=ctx.client.ctaPagoRica||'236899';
+  const pago=ctx.client.ctaPagoRica||'236899',FD=mapaFechasDoc(ctx);
   if(ctx.det&&ctx.det.rows&&ctx.det.sinCuenta&&/reteica/i.test(ctx.det.formato||'')){   // informe de impuestos detallados de SIIGO Nube: no trae cuentas; cada bloque «ReteICA n» es una tarifa por mil
-    return ctx.det.rows.filter(r=>!r.pago).map(r=>({cta:'2368',nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:r.ret,tarifa:r.tarifa!=null?r.tarifa:tarifaMil(r.nom),estimada:false,fecha:r.fecha}));}
+    return ctx.det.rows.filter(r=>!r.pago).map(r=>({cta:'2368',nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:r.ret,tarifa:r.tarifa!=null?r.tarifa:tarifaMil(r.nom),estimada:false,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)}));}
   if(ctx.det&&ctx.det.rows){
     return ctx.det.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.ret!=null?r.ret:(r.cre-r.deb);
-      return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,tarifa:t,estimada:false};});}
+      return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,tarifa:t,estimada:false,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
   if(ctx.led&&ctx.led.rows){
     return ctx.led.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.cre-r.deb;
-      return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:t?a/(t/1000):null,ret:a,tarifa:t,estimada:true,fecha:r.fecha};});}
+      return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:t?a/(t/1000):null,ret:a,tarifa:t,estimada:true,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
   return null;
 }
 function ricaTotal(lines){return lines.reduce((s,x)=>s+x.base,0);}
@@ -13301,10 +13305,10 @@ function xVerifCuadros(ws,d,rf){
   const txt=(r,c,v,st,al)=>{const x=ws.getCell(r,c);x.value=v;x.font=st||N;if(al)x.alignment={horizontal:al};return x;};
   const fm=(r,c,f,st)=>{const x=ws.getCell(r,c);x.value={formula:f};x.numFmt=XMONEY;x.font=st||N;return x;};
   const marco=(r1,r2,sinTop)=>{for(let r=r1;r<=r2;r++)for(let c=5;c<=8;c++){const x=ws.getCell(r,c);x.border={top:r===r1&&!sinTop?THIN:undefined,bottom:r===r2?THIN:undefined,left:c===5?THIN:undefined,right:c===8?THIN:undefined};}};
-  const iva=`SUMIFS(${R('H')},${R('C')},"RTE IVA")+SUMIFS(${R('H')},${R('C')},"NO RESIDENTES")`;
+  const iva=`SUMIFS(${R('I')},${R('D')},"RTE IVA")+SUMIFS(${R('I')},${R('D')},"NO RESIDENTES")`;
   // total de la tabla, y el anexo (renta, sin las líneas de IVA) contra el formulario
-  let r=rf+3;const rT=r;txt(r,6,'TOTAL TABLA',B);fm(r,7,`SUM(${R('G')})`,B);fm(r,8,`SUM(${R('H')})`,B);
-  r+=2;const rA=r;txt(r,6,'ANEXO');fm(r,7,`+G${rT}-SUMIFS(${R('G')},${R('C')},"RTE IVA")-SUMIFS(${R('G')},${R('C')},"NO RESIDENTES")`);fm(r,8,`+H${rT}-(${iva})`);
+  let r=rf+3;const rT=r;txt(r,6,'TOTAL TABLA',B);fm(r,7,`SUM(${R('H')})`,B);fm(r,8,`SUM(${R('I')})`,B);
+  r+=2;const rA=r;txt(r,6,'ANEXO');fm(r,7,`+G${rT}-SUMIFS(${R('H')},${R('D')},"RTE IVA")-SUMIFS(${R('H')},${R('D')},"NO RESIDENTES")`);fm(r,8,`+H${rT}-(${iva})`);
   r++;const rF=r;txt(r,6,'FORMULARIO');fm(r,7,`+Formulario!G${F.r130}`);fm(r,8,`+Formulario!H${F.r130}`);
   r++;txt(r,6,'DIFERENCIA',B);fm(r,7,`G${rF}-G${rA}`,B);fm(r,8,`H${rF}-H${rA}`,B);
   // retención de IVA (el formulario no la separa por jurídica y natural)
@@ -13316,11 +13320,11 @@ function xVerifCuadros(ws,d,rf){
   const cuadro=(r0,tipo,titulo)=>{
     let r=r0;ws.mergeCells(r,5,r,8);txt(r,5,titulo,B,'center');ws.getCell(r,5).border={top:THIN,left:THIN,right:THIN};   // en una celda combinada manda el borde de la celda principal
     const top=r;
-    for(const [nom,colSum,iForm,clave] of [['BASES','G',tipo==='PJ'?2:4,'b'],['IMPUESTO','H',tipo==='PJ'?3:5,'i']]){
+    for(const [nom,colSum,iForm,clave] of [['BASES','H',tipo==='PJ'?2:4,'b'],['IMPUESTO','I',tipo==='PJ'?3:5,'i']]){
       r++;txt(r,5,nom,B,'center');txt(r,6,'FORMULARIO',B,'center');txt(r,7,'ANEXO',B,'center');txt(r,8,'DIFERENCIA',B,'center');
       const a=r+1;for(const rub of tipo==='PJ'?VER_RUBROS.concat(['EXCESO']):VER_RUBROS){r++;txt(r,5,rub);
         // «EXCESO» (casilla 129: retenciones en exceso, indebidas o anuladas) no tiene bases y el formulario la trae en una sola columna; el resto se busca por nombre de rubro
-        fm(r,6,rub==='EXCESO'?(clave==='b'?'0':`+Formulario!H${F.rMenos}`):`VLOOKUP(E${r}&"*",${FR},${iForm},0)`);fm(r,7,`SUMIFS(${R(colSum)},${R('C')},E${r},${R('D')},"${tipo}")`);fm(r,8,`F${r}-G${r}`);}
+        fm(r,6,rub==='EXCESO'?(clave==='b'?'0':`+Formulario!H${F.rMenos}`):`VLOOKUP(E${r}&"*",${FR},${iForm},0)`);fm(r,7,`SUMIFS(${R(colSum)},${R('D')},E${r},${R('E')},"${tipo}")`);fm(r,8,`F${r}-G${r}`);}
       r++;txt(r,5,'TOTAL '+(clave==='b'?'BASES':'IMPUESTOS'),B);for(const c of [6,7,8]){const L=String.fromCharCode(64+c);fm(r,c,`SUM(${L}${a}:${L}${r-1})`,B);}
       tot[tipo+clave]=r;if(clave==='b')r+=1;}   // una fila en blanco entre «bases» y «impuesto», como en el check
     marco(top+1,r);return r;};
@@ -13332,24 +13336,25 @@ function xVerifCuadros(ws,d,rf){
 }
 function xVerif(wb,d){
   const ws=wb.addWorksheet('Verificación',{views:[{showGridLines:false,state:'frozen',ySplit:1}]});
-  ws.columns=[{width:34},{width:14.7},{width:24},{width:7},{width:17.7},{width:30},{width:18},{width:15.1},{width:9},{width:14.1},{width:70},{width:17},{width:16.7},{width:16.4}];
-  const H=['Cuenta - Cód.','Documento #','Concepto','Tipo','Tercero - Cód.','Tercero - Nombre-apellido','Base','Retención','%','Soportes','Observaciones','IBC CÁLCULO 40%','IBC PLANILLA','DIFERENCIA'];
+  ws.columns=[{width:34},{width:14.7},{width:13.5},{width:24},{width:7},{width:17.7},{width:30},{width:18},{width:15.1},{width:9},{width:14.1},{width:70},{width:17},{width:16.7},{width:16.4}];
+  const H=['Cuenta - Cód.','Documento #','Fecha documento','Concepto','Tipo','Tercero - Cód.','Tercero - Nombre-apellido','Base','Retención','%','Soportes','Observaciones','IBC CÁLCULO 40%','IBC PLANILLA','DIFERENCIA'];
   H.forEach((t,i)=>{const x=ws.getCell(1,i+1);x.value=t;x.font=xf({bold:true});x.border={bottom:{style:'medium',color:{argb:XC.navy}}};x.alignment={vertical:'middle',wrapText:true};});
   const L=d.lines||[];const m=d.muestraDocs||new Set();let r=2;
   for(const x of L){
     const fl=(d.flags&&d.flags[x.doc+'|'+x.cta])||[],dian=(d.dianObs&&d.dianObs[x.doc+'|'+x.cta+'|'+x.ter])||null;   // dian: lo que dice el cruce de la línea con la DIAN (recibidos y documentos soporte)
-    ws.getCell(r,1).value=x.cta+' - '+x.nom;ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=x.concepto;ws.getCell(r,4).value=x.tipo;
-    ws.getCell(r,5).value=x.terRaw||x.ter;ws.getCell(r,6).value=x.terN;
-    ws.getCell(r,7).value=x.base==null?null:x.base;ws.getCell(r,8).value=x.ret;
-    ws.getCell(r,9).value={formula:`IFERROR(H${r}/G${r},"")`};
-    ws.getCell(r,11).value=(dian?[dian.obs].concat(fl):fl).join(' · ');
-    [7,8,12,13,14].forEach(c=>ws.getCell(r,c).numFmt=XMONEY);ws.getCell(r,9).numFmt='0.00%';
-    box(ws,r,1,r,14,{font:xf({})});
-    if(fl.length||(dian&&(dian.est==='dif'||dian.est==='sin'))){ws.getCell(r,11).font=xf({color:{argb:'FF9C0006'}});}else if(dian){ws.getCell(r,11).font=xf({color:{argb:'FF006100'}});}   // rojo: alerta; verde: cruza con la DIAN
-    if(m.has(x.doc))box(ws,r,1,r,14,{fill:xfill(XC.muestra)});
+    const fIso=x.fechaIso||fechaISO(x.fecha);
+    ws.getCell(r,1).value=x.cta+' - '+x.nom;ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=fIso?isoDate(fIso):null;ws.getCell(r,3).numFmt='dd/mm/yyyy';ws.getCell(r,4).value=x.concepto;ws.getCell(r,5).value=x.tipo;
+    ws.getCell(r,6).value=x.terRaw||x.ter;ws.getCell(r,7).value=x.terN;
+    ws.getCell(r,8).value=x.base==null?null:x.base;ws.getCell(r,9).value=x.ret;
+    ws.getCell(r,10).value={formula:`IFERROR(I${r}/H${r},"")`};
+    ws.getCell(r,12).value=(dian?[dian.obs].concat(fl):fl).join(' · ');
+    [8,9,13,14,15].forEach(c=>ws.getCell(r,c).numFmt=XMONEY);ws.getCell(r,10).numFmt='0.00%';
+    box(ws,r,1,r,15,{font:xf({})});
+    if(fl.length||(dian&&(dian.est==='dif'||dian.est==='sin'))){ws.getCell(r,12).font=xf({color:{argb:'FF9C0006'}});}else if(dian){ws.getCell(r,12).font=xf({color:{argb:'FF006100'}});}   // rojo: alerta; verde: cruza con la DIAN
+    if(m.has(x.doc))box(ws,r,1,r,15,{fill:xfill(XC.muestra)});
     r++;}
   if(r===2){ws.getCell(2,1).value='Sin auxiliar de retenciones cargado.';ws.getCell(2,1).font=xf({italic:true});}
-  ws.autoFilter={from:{row:1,column:1},to:{row:Math.max(r-1,2),column:14}};
+  ws.autoFilter={from:{row:1,column:1},to:{row:Math.max(r-1,2),column:15}};
   ws.getCell(r+1,1).value='Filas en verde: documentos de la muestra sugerida por la app. Observaciones en rojo: alertas de las revisiones automáticas; con letra verde: la retención cruza con la DIAN (recibidos o documentos soporte).';ws.getCell(r+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
   xVerifCuadros(ws,d,r);
 }
@@ -13592,14 +13597,14 @@ function retLines(ctx){
   let src=(ctx.det&&ctx.det.rows)||(ctx.led&&ctx.led.rows);if(!src)return[];
   // si el reporte de bases no trae alguna cuenta de retención (p. ej. los salarios), esas líneas se toman del movimiento
   if(ctx.det&&ctx.det.rows&&ctx.led&&ctx.led.rows){const enDet=new Set(ctx.det.rows.filter(r=>/^236[57]/.test(r.cta)).map(r=>r.cta));src=ctx.det.rows.concat(ctx.led.rows.filter(r=>/^236[57]/.test(r.cta)&&!enDet.has(r.cta)));}
-  const pago=ctx.client.ctaPago||'236575';const ov=overrides(ctx.client);
+  const pago=ctx.client.ctaPago||'236575';const ov=overrides(ctx.client),FD=mapaFechasDoc(ctx);
   const esAuto=nom=>/autorretenc|autoretenc/.test(String(nom||'').toLowerCase())&&!/por pagar|\bpor\s*$/.test(String(nom||'').toLowerCase());
   // 2365: todo lo que no sea cuenta de pago o de compensación (la autorretención de este plan de cuentas sí cuenta); 2367: retención de IVA
   const out=src.filter(r=>r.cta.startsWith('2367')||(r.cta.startsWith('2365')&&conceptoCuenta(ctx.rules,r.cta,r.nom)!=='PAGO DIAN'&&!(r.cta.startsWith(pago)&&!esAuto(r.nom)))).map(r=>{
     const a=r.ret!=null?r.ret:(r.cre-r.deb);const rl=ruleFor(ctx.rules,r.cta);
     // los rubros de IVA solo se usan en la cuenta 2367: casilla 131 «RTE IVA» y casilla 132 «NO RESIDENTES»
     const concepto=r.cta.startsWith('2367')?(rl&&rl.c==='IVA 132'?'NO RESIDENTES':'RTE IVA'):(conceptoCuenta(ctx.rules,r.cta,r.nom)==='AUTORRETENCIONES'?'AUTORRETENCIONES':(rl?rl.c:''));
-    return{cta:r.cta,nom:r.nom,doc:r.doc,concepto,tipo:tipoPersona(r,ov).t,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a};});
+    return{cta:r.cta,nom:r.nom,doc:r.doc,concepto,tipo:tipoPersona(r,ov).t,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,fechaIso:fechaDeLinea(r,FD)};});
   out.sort((a,b)=>a.cta<b.cta?-1:a.cta>b.cta?1:(a.doc<b.doc?-1:a.doc>b.doc?1:0));return out;
 }
 function flagsDe(results){
@@ -13717,7 +13722,7 @@ function xVerifRica(wb,d){
   const L=d.lineas||[];const m=d.muestraDocs||new Set();let r=2;
   for(const x of L){
     const fl=(d.flags&&d.flags[x.doc+'|'+x.cta])||[];
-    ws.getCell(r,1).value=x.fecha?isoDate(x.fecha):null;ws.getCell(r,1).numFmt='dd/mm/yyyy';
+    {const f=x.fechaIso||fechaISO(x.fecha);ws.getCell(r,1).value=f?isoDate(f):null;}ws.getCell(r,1).numFmt='dd/mm/yyyy';
     ws.getCell(r,2).value=x.doc;ws.getCell(r,3).value=/^\d+$/.test(x.cta)?+x.cta:x.cta;ws.getCell(r,4).value=x.nom;ws.getCell(r,5).value=x.terRaw||x.ter;ws.getCell(r,6).value=x.terN;ws.getCell(r,7).value=x.cc||'';
     ws.getCell(r,8).value=x.base==null?null:Math.round(x.base);ws.getCell(r,9).value=x.ret;
     ws.getCell(r,10).value={formula:`IFERROR(I${r}/H${r},"")`};
@@ -15196,7 +15201,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega57';
+const APP_ENTREGA='fase4b-entrega58';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
