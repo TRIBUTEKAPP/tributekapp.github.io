@@ -549,6 +549,28 @@ body.gate-activo>*:not(#gate):not(#toast):not(script):not(style){visibility:hidd
 .dlg-informe input[type=text],.dlg-informe input[type=date],.dlg-informe textarea{width:100%;box-sizing:border-box}
 .dlg-informe .hall{border:1px solid var(--line,#d9dee7);border-radius:8px;padding:8px 10px;margin:8px 0}
 
+/* ---- Pendientes del mes: resumen, filtro por estado y marca de urgencia ---- */
+.pend-resumen{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0 8px}
+.pend-stat{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:12px;background:var(--soft);border:1px solid var(--line)}
+.pend-stat b{font-size:1.5rem;line-height:1.1;color:var(--ink)}
+.pend-stat span{font-size:.85rem;color:var(--na)}
+.pend-stat.err{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 35%,transparent)}.pend-stat.err b{color:var(--err)}
+.pend-stat.warn{background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}.pend-stat.warn b{color:var(--warn)}
+.pend-stat.ok{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}.pend-stat.ok b{color:var(--ok)}
+.pend-prog{height:8px;border-radius:99px;background:var(--na-bg);overflow:hidden;margin:2px 0 14px}
+.pend-prog i{display:block;height:100%;background:var(--ok);border-radius:99px}
+.pend-seg{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 14px}
+.pend-seg .btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+table.pend td:nth-child(1){white-space:nowrap}
+.pend-vence,.pend-est{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.pend-est{max-width:240px}.pend-est .chip{white-space:normal;line-height:1.3;max-width:100%}
+table.pend tr.pend-venc td:first-child{box-shadow:inset 4px 0 0 var(--err)}
+table.pend tr.pend-hoy td:first-child{box-shadow:inset 4px 0 0 var(--warn)}
+table.pend tr.pend-ok{opacity:.78}
+.pend-vacio{text-align:center;padding:28px 14px;border:1px dashed color-mix(in srgb,var(--ok) 45%,transparent);border-radius:14px;background:var(--ok-bg)}
+.pend-vacio b{display:block;font-size:1.15rem;color:var(--ok);margin-bottom:4px}
+.pend-vacio p{margin:0 0 12px;color:var(--ink)}
+
 </style>
 </head>
 <body>
@@ -1621,8 +1643,30 @@ function parseTercerosPorCuenta(rows){
 /* Con el movimiento por tercero no hay documentos: los cruces documento a documento no aplican */
 const soloAgregado=ctx=>!!(ctx.led&&ctx.led.agregado&&!(ctx.det&&ctx.det.rows));
 const MSG_AGREGADO='El movimiento cargado es por tercero (sin documentos ni fechas): no se puede cruzar documento a documento. Carga el libro auxiliar general o el movimiento de cuentas de SIIGO.';
+/* ===== Balance de prueba con el código y el nombre juntos en una columna «Nombre» («11050505 - CAJA GENERAL»), con o sin «Saldo inicial» ===== */
+/* Columnas: Nombre, [Saldo inicial,] Débito, Crédito, Saldo. Débito positivo y crédito negativo (saldo = saldo inicial + débito − crédito). La versión «sin saldo inicial» solo lista las cuentas con movimiento y su «saldo» es el movimiento
+   del período (débitos menos créditos): se acepta, pero se avisa porque no se puede saber lo que venía de antes. Termina con una fila de «=====» y otra de «Total». */
+function parseBalanceNombreCompuesto(rows){
+  const N=s=>norm(String(s==null?'':s));let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,15)&&hi<0;i++){const t=(rows[i]||[]).map(N),f=(...k)=>t.findIndex(x=>k.includes(x));
+    const nom=f('nombre'),deb=f('debito','debitos'),cre=f('credito','creditos'),sf=f('saldo','saldo final');
+    if(nom>=0&&deb>=0&&cre>=0&&sf>=0){hi=i;c={nom,sa:f('saldo inicial','saldo anterior'),deb,cre,sf};}}
+  if(hi<0)return{err:'No encontré el encabezado del balance (Nombre, Débito, Crédito, Saldo).'};
+  const RX=/^\s*(\d{4,})\s*[-–—]\s*(\S.*?)\s*$/,out=[];let total=null,noCuenta=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],a=String(r[c.nom]==null?'':r[c.nom]).trim();
+    if(/^total$/i.test(a)){total={deb:num(r[c.deb])||0,cre:num(r[c.cre])||0};continue;}
+    const m=RX.exec(a);if(!m){if(a&&!/^=+$/.test(a))noCuenta++;continue;}
+    out.push({cta:m[1],nom:m[2],sa:c.sa>=0?(num(r[c.sa])||0):0,deb:num(r[c.deb])||0,cre:num(r[c.cre])||0,sf:num(r[c.sf])||0});}
+  if(out.length<3||noCuenta>out.length*0.1)return{err:'No encontré cuentas con el formato «código - nombre» en la columna Nombre.'};
+  const sinIni=c.sa<0,avisos=[],mal=out.filter(a=>Math.abs(a.sa+a.deb-a.cre-a.sf)>1.5).length;
+  if(mal>out.length*0.02)avisos.push(mal+' cuentas no cumplen saldo inicial + débito − crédito = saldo');
+  if(total){const sd=out.reduce((s,a)=>s+a.deb,0),sc=out.reduce((s,a)=>s+a.cre,0);if(Math.abs(sd-total.deb)>1||Math.abs(sc-total.cre)>1)avisos.push('la suma de las cuentas no coincide con la fila «Total» del reporte');}
+  return{rows:out,formato:'balance de prueba con código y nombre en una columna ('+(sinIni?'sin saldo inicial: solo las cuentas con movimiento':'con saldo inicial')+')',sinSaldoInicial:sinIni,total,avisos,
+    aviso:sinIni?'no trae el saldo inicial: el «saldo» es solo el movimiento del período (débitos menos créditos), así que no se sabe lo que venía sin pagar del mes anterior ni el saldo final real de cada cuenta; carga el balance con saldo inicial si lo tienes':undefined};
+}
 function parseBalance(rows){
   const sa=parseBalanceSalud(rows);if(!sa.err)return sa;   // libro mayor general del software de salud (encabezado propio)
+  const nc=parseBalanceNombreCompuesto(rows);if(!nc.err)return nc;   // código y nombre juntos en una columna «Nombre» (encabezado propio)
   const sg=parseBalanceSiigo(rows);if(!sg.err)return sg;   // SIIGO primero: el lector estándar leería mal su código de cuenta
   const std=parseBalanceEstandar(rows);if(!std.err)return std;
   const alt=parseBalanceReporte(rows);if(!alt.err)return alt;
@@ -1765,6 +1809,7 @@ function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar co
     try{if(!parseLibroMayorSap(rows).err)return{slot:'led',parece:'libro mayor de SAP Business One'};}catch(e){}
     try{if(!parseMovimientoDobleCodigo(rows).err)return{slot:'led',parece:'movimiento con doble código de cuenta (NIIF y local)'};}catch(e){}
     try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}
+    try{if(!parseBalanceNombreCompuesto(rows).err)return{slot:'bal',parece:'código y nombre en una columna'};}catch(e){}
     try{if(!parseAnexoResumen(rows).err)return{slot:'det',parece:'anexo de retención del cliente (resumen por cuenta)'};}catch(e){}
     try{if(!parseComprobantesDetallados(rows).err)return{slot:'led',parece:'comprobantes detallados del programa contable'};}catch(e){}
     try{if(!parseModuloCxp(rows).err)return{slot:'det',parece:'módulo de cuentas por pagar del software de salud'};}catch(e){}
@@ -4166,7 +4211,8 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
   return{err:propio.err.replace(/\.$/,'')+', y la detección automática tampoco lo reconoce. Revisa que sea el reporte correcto o cambia el programa en el perfil del cliente.'};
 }
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
-const autoBases=(rows,fam)=>{const an=parseAnexoResumen(rows);if(!an.err)return an;   // anexo del cliente (resumen por cuenta): encabezado propio
+const autoBases=(rows,fam)=>{if(!parseBalanceNombreCompuesto(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
+  const an=parseAnexoResumen(rows);if(!an.err)return an;   // anexo del cliente (resumen por cuenta): encabezado propio
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
   if(x.err){const mc=parseModuloCxp(rows);if(!mc.err)x=mc;}   // módulo de cuentas por pagar del software de salud (base real, fecha y factura)
@@ -14142,7 +14188,7 @@ function fmtFechaCorta(iso){return +iso.slice(8,10)+' '+MES_ABR[+iso.slice(5,7)-
 function fmtFecha(iso){const y=+iso.slice(0,4),m=+iso.slice(5,7),d=+iso.slice(8,10);return d+' de '+MESES_ES[m-1]+' de '+y;}
 function chipVence(iso){if(!iso)return'';const n=diasEntre(hoyISO(),iso);
   return n<0?{k:'err',t:'venció hace '+(-n)+' día'+(n===-1?'':'s')}:n===0?{k:'warn',t:'vence hoy'}:{k:n<=5?'warn':'na',t:'faltan '+n+' día'+(n===1?'':'s')};}
-const S={clients:[],id:null,delId:null,delPaso:0,delTxt:'',delOrigen:'rail',filtro:'',imp:'retefuente',tabs:{},per:{iva:null,ica:null,reteica:null},pendImp:'todos',tab:'cliente',period:defaultPeriod(),data:{},form:{},iva:null,ivaC:{c131:null,c132:null,c133:null},ex:{c135:null,c137:null},view:'cliente',pendMes:hoyISO().slice(0,7),calPrev:null,results:null,db:null,dl:null,mode:'local',toast:''};
+const S={clients:[],id:null,delId:null,delPaso:0,delTxt:'',delOrigen:'rail',filtro:'',imp:'retefuente',tabs:{},per:{iva:null,ica:null,reteica:null},pendImp:'todos',pendVer:'pend',tab:'cliente',period:defaultPeriod(),data:{},form:{},iva:null,ivaC:{c131:null,c132:null,c133:null},ex:{c135:null,c137:null},view:'cliente',pendMes:hoyISO().slice(0,7),calPrev:null,results:null,db:null,dl:null,mode:'local',toast:''};
 function syncIva(){const c=S.ivaC;S.iva=(c.c131==null&&c.c132==null&&c.c133==null)?null:(c.c131||0)+(c.c132||0)-(c.c133||0);}
 function derivar350(){const r=form350FromMap(S.cas||{});S.form=r.form;S.auto=r.auto;}
 function resetForm(){S.form={};S.auto={};S.cas={};S.iva=null;S.ivaC={c131:null,c132:null,c133:null};S.ex={c135:null,c137:null};}
@@ -14549,17 +14595,23 @@ function viewPend(){
     items.push({c,o,est:estadoRevision(c,periodoKey(o.imp,o.id),o.imp),dias:diasEntre(hoy,o.fecha)});}
   items.sort((a,b)=>a.o.fecha<b.o.fecha?-1:a.o.fecha>b.o.fecha?1:(IMPS.indexOf(a.o.imp)-IMPS.indexOf(b.o.imp))||(a.c.razon||'').localeCompare(b.c.razon||''));
   const sinNit=cli.filter(c=>nitDigito(c.nit)==null).length;
-  const tabla=items.length?`<div class="scroll"><table><thead><tr><th>Vence</th><th></th><th>Cliente</th><th>Impuesto</th><th>Período</th><th>Encargado</th><th>Estado de la revisión</th><th></th></tr></thead><tbody>${items.map(r=>{
-     const ch=chipVence(r.o.fecha);const urg=r.est.k!=='ok'&&r.dias<0?'<span class="chip err">Vencido sin revisión completa</span>':r.est.k==='na'&&r.dias<=3&&r.dias>=0?'<span class="chip warn">Revisión sin iniciar</span>':'';
-     return `<tr><td style="white-space:nowrap">${esc(fmtFechaCorta(r.o.fecha))}</td><td><span class="chip ${ch.k}">${esc(ch.t)}</span></td><td><b>${esc(r.c.razon)}</b></td><td>${esc(IMP_NOMBRE[r.o.imp])}</td><td>${esc(r.o.txt)}</td><td>${esc(r.c.encargado||'')}</td><td><span class="chip ${r.est.k}">${esc(r.est.t)}</span> ${urg}</td><td><button class="btn ghost" data-a="openp" data-id="${esc(r.c.id)}" data-imp="${esc(r.o.imp)}" data-p="${esc(r.o.id)}">Abrir</button></td></tr>`;}).join('')}</tbody></table></div>`
-    :'<p class="hint">No hay obligaciones que venzan en ese mes con los perfiles y los calendarios cargados.</p>';
-  const opts=[['todos','Todos los impuestos'],...IMPS.map(i=>[i,IMP_NOMBRE[i]])];
   const mesTxt=MESES_ES[+S.pendMes.slice(5,7)-1]+' de '+S.pendMes.slice(0,4);
+  const pend=items.filter(r=>r.est.k!=='ok'),rev=items.filter(r=>r.est.k==='ok'),ver=S.pendVer==='rev'||S.pendVer==='todas'?S.pendVer:'pend',lista=ver==='pend'?pend:ver==='rev'?rev:items;   // lo ya revisado (cerrado a mano o con el checklist completo) se oculta por defecto
+  const fila=r=>{const ch=chipVence(r.o.fecha),ok=r.est.k==='ok',urg=!ok&&r.dias<0?'<span class="chip err">Vencido sin revisión completa</span>':!ok&&r.est.k==='na'&&r.dias<=3&&r.dias>=0?'<span class="chip warn">Revisión sin iniciar</span>':'',cls=ok?'pend-ok':r.dias<0?'pend-venc':r.dias===0?'pend-hoy':'';
+    return `<tr class="${cls}"><td><div class="pend-vence"><span>${esc(fmtFechaCorta(r.o.fecha))}</span><span class="chip ${ch.k}">${esc(ch.t)}</span></div></td><td><b>${esc(r.c.razon)}</b></td><td>${esc(IMP_NOMBRE[r.o.imp])}</td><td>${esc(String(r.o.txt).replace(/^Retención de (?=[a-záéíóúñ]+ de \d{4}$)/i,''))}</td><td>${esc(r.c.encargado||'')}</td><td><div class="pend-est"><span class="chip ${r.est.k}">${esc(r.est.t)}</span>${urg}</div></td><td><button class="btn ghost" data-a="openp" data-id="${esc(r.c.id)}" data-imp="${esc(r.o.imp)}" data-p="${esc(r.o.id)}">Abrir</button></td></tr>`;};
+  const tabla=lista.length?`<div class="scroll"><table class="pend"><thead><tr><th>Vence</th><th>Cliente</th><th>Impuesto</th><th>Período</th><th>Encargado</th><th>Estado de la revisión</th><th></th></tr></thead><tbody>${lista.map(fila).join('')}</tbody></table></div>`
+    :!items.length?'<p class="hint">No hay obligaciones que venzan en ese mes con los perfiles y los calendarios cargados.</p>'
+    :ver==='pend'?`<div class="pend-vacio" role="status"><b>Todo al día</b><p>Las ${items.length} obligaciones de ${esc(mesTxt)} ya están revisadas.</p><button class="btn ghost" type="button" data-a="pendver" data-v="rev">Ver las revisadas</button></div>`
+    :'<p class="hint">Todavía no hay obligaciones revisadas en este mes.</p>';
+  const nVenc=pend.filter(r=>r.dias<0).length,nHoy=pend.filter(r=>r.dias===0).length,nSem=pend.filter(r=>r.dias>0&&r.dias<=7).length,pct=items.length?Math.round(100*rev.length/items.length):0;
+  const resumen=items.length?`<div class="pend-resumen" role="group" aria-label="Resumen del mes"><div class="pend-stat ${nVenc?'err':''}"><b>${nVenc}</b><span>vencidos sin revisión completa</span></div><div class="pend-stat ${nHoy?'warn':''}"><b>${nHoy}</b><span>vencen hoy</span></div><div class="pend-stat"><b>${nSem}</b><span>vencen en los próximos 7 días</span></div><div class="pend-stat ok"><b>${rev.length} de ${items.length}</b><span>revisadas (${pct} %)</span></div></div><div class="pend-prog" role="progressbar" aria-label="Avance de la revisión del mes" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>`:'';
+  const seg=items.length?`<div class="pend-seg" role="group" aria-label="Qué mostrar">${[['pend','Por revisar',pend.length],['rev','Revisadas',rev.length],['todas','Todas',items.length]].map(([k,t,n])=>`<button class="btn ghost" type="button" data-a="pendver" data-v="${k}" aria-pressed="${ver===k}">${t} (${n})</button>`).join('')}</div>`:'';
+  const opts=[['todos','Todos los impuestos'],...IMPS.map(i=>[i,IMP_NOMBRE[i]])];
   return `<div class="head"><div><button class="hm-back" data-a="home">${ICO.back}Todos los clientes</button><h2>Pendientes del mes</h2><div class="meta">Lo que vence en el mes elegido, ordenado por fecha</div></div>
     <div class="row"><div class="period"><label for="pendimp">Impuesto</label><select id="pendimp" data-c="pendimp">${opts.map(o=>`<option value="${o[0]}" ${S.pendImp===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
     <div class="period"><label for="pendmes">Vence en</label><input type="month" id="pendmes" value="${esc(S.pendMes)}" data-c="pendmes"></div></div></div>
     <div style="height:14px"></div>
-    <div class="panel"><h3>Vencimientos de ${esc(mesTxt)}</h3><p class="hint">Las fechas salen de los calendarios cargados y del perfil de cada cliente (NIT, IVA, municipio, régimen de ICA y agente de retención). El estado sale de lo que ya se ejecutó y marcó en el checklist de cada período.${sinNit?' '+sinNit+' cliente(s) sin NIT válido no aparecen en retención ni en IVA.':''}</p>${tabla}</div>
+    <div class="panel"><h3>Vencimientos de ${esc(mesTxt)}</h3><p class="hint">Las fechas salen de los calendarios cargados y del perfil de cada cliente (NIT, IVA, municipio, régimen de ICA y agente de retención). El estado sale de lo que ya se ejecutó y marcó en el checklist de cada período. Las ya revisadas (cerradas a mano o con el checklist completo) se ocultan para que veas solo lo pendiente; usa «Revisadas» o «Todas» para verlas.${sinNit?' '+sinNit+' cliente(s) sin NIT válido no aparecen en retención ni en IVA.':''}</p>${resumen}${seg}${tabla}</div>
     ${panelCalendarios(cals)}`;
 }
 /* ---- «Normatividad utilizada»: qué documento usa la app en cada revisión y si sigue vigente ---- */
@@ -15362,7 +15414,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega61';
+const APP_ENTREGA='fase4b-entrega63';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -15605,6 +15657,7 @@ document.addEventListener('click',async e=>{
   else if(a==='hkpi'){const h=hs();h.estado=h.estado===b.dataset.g?'todos':b.dataset.g;refrescarTablero();}
   else if(a==='hmodo'){const h=hs();h.modo=b.dataset.m==='matriz'?'matriz':'tarjetas';guardarPrefsTablero();render();}
   else if(a==='hreset'){const h=hs();h.q='';h.estado='todos';h.imp='todos';h.enc='todos';render();}
+  else if(a==='pendver'){S.pendVer=b.dataset.v==='rev'||b.dataset.v==='todas'?b.dataset.v:'pend';render();}
   else if(a==='openp'){S.view='cliente';S.id=b.dataset.id;S.imp=b.dataset.imp||'retefuente';if(S.imp==='retefuente'){S.period=b.dataset.p;S.tab='archivos';}else{S.per[S.imp]=b.dataset.p;S.tab=(S.imp==='reteica'||S.imp==='ica')?'archivos':'checklist';}S.data={};S.results=null;resetRica();resetIca();restoreForm(cur()&&cur().periods[S.period]);render();}
   else if(a==='calsave'){const p=S.calPrev;if(p&&p.cal){const ex=calsLoaded().filter(x=>calKey(x)!==calKey(p.cal));ex.push({entidad:p.cal.entidad||'DIAN',municipio:p.cal.municipio,anio:p.cal.anio,fuente:p.nombre,bloques:p.cal.bloques,avisos:[],cargado:new Date().toISOString()});try{localStorage.setItem(CAL_LS,JSON.stringify(ex));toast('Calendario '+(p.cal.entidad||'DIAN')+' '+p.cal.anio+' guardado en este navegador.');}catch(e){toast('No pude guardar el calendario.');}S.calPrev=null;render();}}
   else if(a==='caldesc'){S.calPrev=null;render();}
