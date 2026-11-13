@@ -1810,6 +1810,7 @@ function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar co
     try{if(!parseMovimientoDobleCodigo(rows).err)return{slot:'led',parece:'movimiento con doble código de cuenta (NIIF y local)'};}catch(e){}
     try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}
     try{if(!parseRelacionSiesa(rows).err)return{slot:'det',parece:'relación de retenciones de Siesa'};}catch(e){}
+    try{if(!parseMovimientoAuxiliarNube(rows).err)return{slot:'led',parece:'movimiento auxiliar por cuenta contable de SIIGO Nube'};}catch(e){}
     try{if(!parseMovimientoSiesa(rows).err)return{slot:'led',parece:'movimiento de cuentas de Siesa'};}catch(e){}
     try{if(!parseBalanceNombreCompuesto(rows).err)return{slot:'bal',parece:'código y nombre en una columna'};}catch(e){}
     try{if(!parseAnexoResumen(rows).err)return{slot:'det',parece:'anexo de retención del cliente (resumen por cuenta)'};}catch(e){}
@@ -1983,7 +1984,35 @@ function enriquecerSiesa(o){
   const sinRel=[...grupos.keys()].filter(k=>!porRel.has(k)&&/^2365/.test(k)).length;
   return{led:Object.assign({},led,{rows,hasBase:true,baseEstimada:rows.some(r=>r.baseEstimada)}),det:null,info:{siesaUnidos:unidos,siesaLineas:lineas,siesaDifieren:difieren,siesaRelacionSinMovimiento:sinMov,siesaMovimientoSinRelacion:sinRel}};
 }
-function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const cd=parseComprobantesDetallados(rows);if(!cd.err)return cd;const sm=parseMovimientoSiesa(rows);if(!sm.err)return sm;const ms=parseMovimientoSalud(rows);if(!ms.err)return ms;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
+/* ===== SIIGO Nube: «Movimiento auxiliar por cuenta contable» (todas las cuentas; suele traer varios meses) ===== */
+/* Columnas: Código cuenta contable, Cuenta contable, Comprobante («CC-992-752»), Secuencia, Fecha Elaboración (dd-mm-aaaa), Identificación, Sucursal, Nombre tercero, Descripcion, Detalle, Centro de Costo, Saldo inicial, Débito, Crédito,
+   Saldo Movimiento y Saldo total cuenta. Cada cuenta abre con una fila de saldo inicial (sin fecha) y cierra con «Total …»: no son asientos. En las retenciones el «Detalle» trae la base («Retefuente Honorarios 11% Base: 1.250.000»). */
+function parseMovimientoAuxiliarNube(rows){
+  const nz=s=>norm(String(s==null?'':s)),tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,15)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    if(f('codigo cuenta contable')>=0&&f('comprobante')>=0&&f('secuencia')>=0&&f('fecha elaboracion')>=0&&f('identificacion')>=0&&f('nombre tercero')>=0&&f('debito')>=0&&f('credito')>=0){hi=i;c={cta:f('codigo cuenta contable'),nom:f('cuenta contable'),doc:f('comprobante'),fec:f('fecha elaboracion'),nit:f('identificacion'),ter:f('nombre tercero'),des:f('descripcion'),det:f('detalle'),cc:f('centro de costo'),deb:f('debito'),cre:f('credito')};}}
+  if(hi<0)return{err:'No encontré el encabezado del movimiento auxiliar por cuenta contable (Código cuenta contable, Comprobante, Fecha Elaboración, Identificación, Débito, Crédito).'};
+  let empresa='',nit='';for(let i=0;i<hi;i++){const v=tx((rows[i]||[])[0]);if(!v||/^movimiento auxiliar/i.test(v)||/^de\s+\S+\s+\d/i.test(v))continue;if(/^\d[\d.\- ]+$/.test(v)){if(!nit)nit=v;}else if(!empresa)empresa=v;}
+  const out=[],meses=new Set();let conBase=0,pagos=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],cta=tx(r[c.cta]);if(!/^\d{4,}$/.test(cta))continue;   // «Total …», «Procesado en…» y las filas vacías no son asientos
+    let f=r[c.fec];f=typeof f==='number'?serialAFecha(f):tx(f);const mf=/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/.exec(f);if(!mf)continue;   // las filas de saldo inicial no traen fecha
+    const fecha=mf[1].padStart(2,'0')+'/'+mf[2].padStart(2,'0')+'/'+mf[3];meses.add(mf[3]+'-'+mf[2].padStart(2,'0'));
+    const deb=num(r[c.deb])||0,cre=num(r[c.cre])||0,a=cre-deb,nitR=tx(r[c.nit]),terN=c.ter>=0?tx(r[c.ter]):'',des=c.des>=0?tx(r[c.des]):'',det=c.det>=0?tx(r[c.det]):'',ret=/^236[578]/.test(cta);let nom=c.nom>=0?tx(r[c.nom]):'',ctaX=cta,base=null,est=false,pago=false,ctaPagada;
+    if(ret){const bm=/base:\s*([\d.,]+)/i.exec(det+' '+des),b=bm?num(bm[1]):null;if(b!=null&&b>0)base=a<0?-b:b;
+      if(base==null&&a&&!/por pagar|a pagar/i.test(nom)){const t=/^2368/.test(cta)?(tarifaMil(nom)||(()=>{const m=/(\d+(?:[.,]\d+)?)\s*$/.exec(nom);return m?parseFloat(m[1].replace(',','.')):null;})()):tarifaSalud('',nom);if(t){base=a/(t/(/^2368/.test(cta)?1000:100));est=true;}}
+      if(base!=null)conBase++;
+      if(deb>0&&cre===0&&(digits(nitR)==='800197268'||/direccion de impuestos/i.test(terN))){pago=true;ctaPagada=cta;ctaX='23657599';nom='PAGO DE RETENCIONES (DIAN)';base=null;est=false;pagos++;}}
+    out.push({fecha,doc:tx(r[c.doc]),cta:ctaX,ctaOrig:pago?cta:undefined,nom,ter:/^\d+$/.test(nitR)?nitR:nitR.toUpperCase(),terRaw:nitR,terN,desc:des,detalle:det,cc:c.cc>=0?tx(r[c.cc]):'',fuente:tx(r[c.doc]).split('-')[0],deb,cre,base,ret:null,baseEstimada:est||undefined,pago:pago||undefined,ctaPagada});}
+  if(!out.length)return{err:'No encontré asientos en el movimiento auxiliar.'};
+  const ms=[...meses].sort();
+  return{rows:out,hasBase:conBase>0,empresa,nit,meses:ms,multiMes:ms.length>1,pagos,formato:'movimiento auxiliar por cuenta contable de SIIGO Nube (la base de cada retención sale del campo «Detalle»; sin ella, se estima con la tarifa del nombre de la cuenta)'};
+}
+/* Un movimiento de varios meses se recorta al mes (o bimestre) de la revisión: las retenciones de otros meses no son de esta declaración. */
+function filtrarMovimientoPorMeses(led,meses){
+  if(!led||!led.multiMes||!led.rows||!meses||!meses.length)return led;const set=new Set(meses);
+  return Object.assign({},led,{rows:led.rows.filter(r=>{const f=fechaISO(r.fecha);return f&&set.has(f.slice(0,7));}),recortadoA:meses.slice(),totalFilas:led.rows.length});
+}
+function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const cd=parseComprobantesDetallados(rows);if(!cd.err)return cd;const sm=parseMovimientoSiesa(rows);if(!sm.err)return sm;const ma=parseMovimientoAuxiliarNube(rows);if(!ma.err)return ma;const ms=parseMovimientoSalud(rows);if(!ms.err)return ms;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
 function parseLedgerEstandar(rows){
   const h=findHeader(rows,c=>c.some(x=>x.startsWith('documento'))&&c.some(x=>x.startsWith('cuenta'))&&((c.some(x=>x.startsWith('debito'))&&c.some(x=>x.startsWith('credito')))||c.some(x=>x.startsWith('retencion'))));
   if(!h)return{err:'No encontré el encabezado (Documento, Cuenta y Débito/Crédito o Retención).'};
@@ -14542,7 +14571,7 @@ async function loadSlot(k,files,opc){
       if(lg){const c=completarDebCre(r.rows,lg.rows);if(c.cuadre>=0.95){r.rows=c.rows;r.netoMes=false;r.debCre='débitos y créditos tomados de la hoja de movimiento del mismo libro';
         if(!DD.led)DD.led={names:names.slice(),parsed:{rows:lg.rows,hasBase:false,formato:lg.formato,archivos:1,movRaw:[{archivo:names[0],hoja:lgs.s.name,rows:lgs.s.rows}]},info:lg.rows.length.toLocaleString('es-CO')+' filas leídas · '+lg.formato+' · tomado de la hoja de movimiento del mismo libro'};}}}}
   else if(k==='led'){const ok=[],raws=[],usadasL=[],ignL=[];let last=null;porArchivo.forEach((sh,i)=>{const cands=[];for(const s of sh){const x=leerMovimiento(s.rows,sw);if(x.err){last=x;continue;}cands.push({name:s.name,hidden:!!s.hidden,x,s});}if(cands.length){const el=elegirHojaMovimiento(cands,mesesP),best=el.elegida;ok.push(best.x);raws.push({archivo:names[i],hoja:best.s.name,rows:best.s.rows});if(cands.length>1){usadasL.push(best.name);ignL.push(...el.ignoradas);}}});   // raws: el archivo tal como llegó, para la hoja «Mov» del Excel (solo en memoria)
-    r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice,hojasTxt:textoHojas(usadasL,ignL)}:(last||{err:'El archivo está vacío.'});}
+    r=ok.length?{rows:ok.flatMap(x=>x.rows),movRaw:raws,hasBase:ok.some(x=>x.hasBase),formato:ok[0].formato,archivos:ok.length,agregado:ok.every(x=>x.agregado),corte:ok[0].corte,corteTxt:ok[0].corteTxt,nit:ok[0].nit,sinNit:ok.some(x=>x.sinNit),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]))],adaptador:ok[0].adaptador,multiMes:ok.some(x=>x.multiMes),meses:[...new Set(ok.flatMap(x=>x.meses||[]))].sort(),leidoComo:(ok.find(x=>x.leidoComo)||{}).leidoComo,perfilDice:(ok.find(x=>x.leidoComo)||{}).perfilDice,hojasTxt:textoHojas(usadasL,ignL)}:(last||{err:'El archivo está vacío.'});}
   else if(k==='det'){let best=null,bkey=null,last=null;const fam=S.imp==='reteica'?'reteica':'retefuente';for(const sh of all){const x=leerBases(sh.rows,sw,fam);if(x.err){last=x;continue;}
       const esBases=y=>!!(y&&y.formato&&/bases de retención/.test(y.formato));   // el reporte de bases de SIIGO trae base, retención y tipo de persona
       const kk=[sh.hidden?0:1,x.anexoResumen?1:0,esBases(x)?1:0,x.hasBase?1:0,x.completo?1:0,x.rows.length];if(!best||cmpK(kk,bkey)>0){best=x;bkey=kk;}}r=best||last||{err:'El archivo está vacío.'};}
@@ -14599,6 +14628,7 @@ async function loadSlot(k,files,opc){
   if(k==='led'&&r.hojasTxt)info2+=' · '+r.hojasTxt;
   if((k==='led'||k==='det')&&r.agregado){info2+=' · es por tercero, sin documentos: sirve para cuadrar por jurídicas y naturales; para los cruces con la DIAN carga el libro auxiliar o el movimiento de cuentas';warn2=true;}
   if((k==='led'||k==='det')&&r.corteTxt){info2+=' · corresponde a '+r.corteTxt;if(S.imp==='retefuente'&&r.corte&&r.corte!==S.period){info2+=' · '+mt('LEC-PER-001',{mesArchivo:r.corteTxt,mesElegido:periodoTxt(S.period)});warn2=true;}}
+  if((k==='led'||k==='det')&&r.multiMes&&r.meses){const a1=periodoTxt(r.meses[0]),b1=periodoTxt(r.meses[r.meses.length-1]);info2+=' · trae '+r.meses.length+' meses ('+a1+' a '+b1+'): en cada revisión se usa solo el del período elegido';if(S.imp==='retefuente'&&!r.meses.includes(S.period)){info2+=' · '+mt('LEC-PER-001',{mesArchivo:a1+' a '+b1,mesElegido:periodoTxt(S.period)});warn2=true;}}
   if(r.leidoComo){info2+=' · OJO: Leído como '+r.leidoComo+'; tu perfil dice '+r.perfilDice;warn2=true;}   // el lector del programa del perfil no lo reconoció; lo leyó la detección automática
   if(k==='det'&&r.completo!==undefined&&/SAP Business One/.test(r.formato||'')){const ex=[];if(r.empresa)ex.push(r.empresa);
     const mh=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(r.hasta||'');if(mh){const mp=mh[3]+'-'+mh[2].padStart(2,'0');ex.push('corresponde a '+periodoTxt(mp));if(S.imp==='retefuente'&&mp!==S.period){ex.push(mt('LEC-PER-001',{mesArchivo:periodoTxt(mp),mesElegido:periodoTxt(S.period)}));warn2=true;}}
@@ -14612,7 +14642,7 @@ function buildCtx(){
   const c=cur(),d=S.data,g=k=>d[k]&&d[k].parsed;
   const sp=g('dian')?splitDian(g('dian'),S.period,c&&c.nit):null;
   const anexo=g('det')&&g('det').anexoResumen?g('det'):null,detUso=anexo?null:g('det');
-  const nube0=enriquecerNube({led:g('led'),det:detUso,rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud0=enriquecerSalud({led:nube0.led,det:nube0.det}),salud=enriquecerSiesa({led:salud0.led,det:salud0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
+  const nube0=enriquecerNube({led:filtrarMovimientoPorMeses(g('led'),[S.period]),det:detUso,rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud0=enriquecerSalud({led:nube0.led,det:nube0.det}),salud=enriquecerSiesa({led:salud0.led,det:salud0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
   const nubeInfo=Object.assign({},nube.info,{totalMov:nube.led&&nube.led.rows?nube.led.rows.length:0,totalBases:nube.det&&nube.det.rows?nube.det.rows.length:0,necesitaNit:!!(g('led')&&g('led').sinNit),necesitaCta:!!(g('det')&&g('det').sinCuenta)});
   const uvtL=uvtLista(),uvtP=uvtEfectiva(uvtL,+String(S.period||'').slice(0,4)||new Date().getFullYear(),c.uvtEspecial);   // UVT del año del período; si el cliente tiene una especial, esa
   return{client:c,period:S.period,meta:pdata().meta,tol:+c.tol||1000,uvt:uvtP.valor,uvtInfo:uvtP,uvtLista:uvtL,rules:c.rules,
@@ -15250,7 +15280,7 @@ async function loadSlotR(k,files){if(k==='f131'&&files.length){await loadForm131
 function prevDeclR(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const b=bimInfo(S.per.reteica),c=cur();const pp=b&&c.periods[periodoKey('reteica',b.prevId)];return pp&&pp.declarado?pp.declarado.total:null;}
 function buildCtxR(){
   const c=cur(),d=S.rica.data,g=k=>d[k]&&d[k].parsed;const id=S.per.reteica,bim=bimInfo(id),cals=allCals();
-  return{client:c,period:bim.fin,bim,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:g('led'),det:g('det'),form:hasF131()?S.rica.form:null,
+  return{client:c,period:bim.fin,bim,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:filtrarMovimientoPorMeses(g('led'),[prevP(bim.fin),bim.fin]),det:g('det'),form:hasF131()?S.rica.form:null,
     venceActual:fechaObligacion(c,cals,'reteica',id),vencePrev:fechaObligacion(c,cals,'reteica',bim.prevId),prevDecl:prevDeclR()};
 }
 function runValidationR(){
@@ -15390,7 +15420,7 @@ function ingPrevDef(){const c=cur(),b=bimInfo(S.per.ica);if(!b||c.icaRegimen!=='
 function buildCtxI(){
   const c=cur(),d=S.ica.data,g=k=>d[k]&&d[k].parsed,id=S.per.ica,p=icaPeriodo(c,id),cals=allCals();
   const form=Object.assign({},S.ica.form);if(form.ingPrev==null||form.ingPrev==='')form.ingPrev=ingPrevDef();
-  return{client:c,tipo:p.tipo,bim:p.bim,anio:p.anio,period:p.period,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:g('led'),det:g('det'),cert:g('cert'),form,
+  return{client:c,tipo:p.tipo,bim:p.bim,anio:p.anio,period:p.period,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:filtrarMovimientoPorMeses(g('led'),p.bim?[prevP(p.bim.fin),p.bim.fin]:Array.from({length:12},(_,k)=>p.anio+'-'+String(k+1).padStart(2,'0'))),det:g('det'),cert:g('cert'),form,
     venceActual:fechaObligacion(c,cals,'ica',id),vencePrev:fechaObligacion(c,cals,'ica',p.prevId),prevDecl:prevDeclI()};
 }
 function runValidationI(){
@@ -15474,7 +15504,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega65';
+const APP_ENTREGA='fase4b-entrega66';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
