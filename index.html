@@ -13297,19 +13297,12 @@ function xFormulario(wb,d){
   const br=balanceRows(d),ro=br.rowOf,bal=d.bal||[];
   if(ro['2365']&&d.rules){
     let q=r+4;const tol=+d.tol||1000;
-    ws.getCell(q,1).value='Cruce por rubro del formulario con el balance (cuentas 2365 y 2367)';ws.getCell(q,1).font=xf({bold:true});q++;
-    ['Concepto','Libros','Formulario','Diferencia','Estado'].forEach((t,i)=>{const x=ws.getCell(q,1+i);x.value=t;x.font=xf({bold:true,color:{argb:XC.white}});x.fill=xfill(XC.navy);x.border=BOX;x.alignment={horizontal:i?'center':'left'};});
-    ws.getCell(q,7).value='De dónde sale la contabilidad';ws.getCell(q,7).font=xf({bold:true,color:{argb:XC.white}});ws.getCell(q,7).fill=xfill(XC.navy);ws.mergeCells(q,7,q,9);
-    ws.getCell(q-1,8).value='Tolerancia';ws.getCell(q-1,8).font=xf({size:9});ws.getCell(q-1,9).value=tol;ws.getCell(q-1,9).numFmt=XMONEY;ws.getCell(q-1,9).font=xf({size:9});const cTol=`$I$${q-1}`;
-    q++;
-    const rowDe=rowDeF;
-    const h2365=leafs(bal,'2365');const porC={};let todasNoPago=[];
+    let cTol='$I$1';   // la celda de la tolerancia se escribe junto al título del cuadro de totales
     const mov=!!(((d.results||[]).find(r=>r.id==='cuadre')||{}).datos&&((d.results||[]).find(r=>r.id==='cuadre').datos.base==='mov'));   // el cliente acumula el año en las cuentas: se compara el movimiento del período
     const valA=a=>mov?a.sf-a.sa:a.sf;
     const fCta=c=>mov?`-(Balance!F${ro[c]}-Balance!C${ro[c]})`:`-Balance!F${ro[c]}`;
     const vCta=c=>{const a=bal.find(z=>z.cta===c)||{sf:0,sa:0};return -valA(a);};
     const txtB=mov?'Movimiento del período (columna F menos columna C)':'Saldo final (columna F)';
-    for(const a of h2365){const c=conceptoCuenta(d.rules,a.cta,a.nom);if(c==='PAGO DIAN')continue;(porC[c]=porC[c]||[]).push(a);todasNoPago.push(a);}
     const linea2=(txt,libF,libRes,forF,forRes,origenTxt,bold)=>{
       ws.getCell(q,1).value=txt;ws.getCell(q,1).font=xf({bold:!!bold});
       const l=ws.getCell(q,2);l.value=libF?{formula:libF,result:libRes}:null;const fo=ws.getCell(q,3);fo.value=forF?{formula:forF,result:forRes}:null;
@@ -13322,36 +13315,13 @@ function xFormulario(wb,d){
     const menosF=(d.form&&d.form['MENOS RTE FTE']&&d.form['MENOS RTE FTE'].ret)||0;
     // Libros = saldo final (columna F) de cada cuenta mayor, tal como está en el balance, sin importar el saldo inicial, los débitos o los créditos.
     // El saldo anterior (columna C) dice cuánto venía pendiente de pago del mes anterior.
-    const an=analizarRetencion({bal,rules:d.rules,form:d.form||{},tol},mov?'mov':'sf');
-    const rowMenos=q+an.grupos.length+an.sinCuenta.length;
     const fSA=ctas=>ctas.map(c=>`(-Balance!C${ro[c]})`).join('+');
-    const estPend=(qq,saF,dev)=>({formula:dev
-      ?`IF(ABS(D${qq})<=${cTol},"OK",IF(AND((${saF})>${cTol},OR(ABS(D${qq}+(${saF}))<=${cTol},AND(D${qq}+(${saF})>0,ABS(D${rowMenos})<=${cTol}))),"Pendiente mes anterior",IF(AND(D${qq}>0,ABS(D${rowMenos})<=${cTol}),"OK","Revisar")))`
-      :`IF(ABS(D${qq})<=${cTol},"OK",IF(AND((${saF})>${cTol},ABS(D${qq}+(${saF}))<=${cTol}),"Pendiente mes anterior","Revisar"))`});
-    const nomG=g=>g.mayores.length===1?'Cuenta mayor '+g.mayores[0].cta+' · '+g.mayores[0].nom:'Cuentas mayores '+g.mayores.map(m=>m.cta).join(' + ')+' · '+g.mayores.map(m=>m.nom).join(' + ');
-    for(const g of an.grupos){const una=g.mayores.length===1,todas=g.mayores.every(m=>ro[m.cta]);
-      const libF=todas?g.mayores.map(m=>mov?`(-(Balance!F${ro[m.cta]}-Balance!C${ro[m.cta]}))`:`(-Balance!F${ro[m.cta]})`).join('+'):null;
-      const forF=g.rubros.map(c=>`H${rowDe[c]}`).join('+');
-      const det=una?'Saldo anterior $'+fm(g.sa||0)+' · débitos $'+fm(g.deb||0)+' · créditos $'+fm(g.cre||0)+' · saldo final $'+fm(g.sf||0):g.mayores.map(m=>m.cta+': saldo anterior $'+fm(m.sa||0)+' · saldo final $'+fm(m.sf||0)).join(' | ');
-      const qq=q;linea2(nomG(g),libF,g.valor,forF,g.f,det+(mov?' · se cruza el movimiento del período ($'+fm(g.mov||0)+')':' · se cruza el saldo final (columna F), sin importar el saldo inicial, los débitos ni los créditos')+(g.comp?' · incluye cuentas de compensación por $'+fm(g.comp):'')+' · rubro(s): '+g.rubros.join(' + ')+' · si el saldo final no cuadra pero el movimiento sí, la diferencia es el saldo anterior pendiente de pago');
-      if(todas&&!mov){const x=estPend(qq,fSA(g.mayores.map(m=>m.cta)),g.expl);x.result=g.est;ws.getCell(qq,5).value=x;}}
-    for(const c of an.sinCuenta)linea2(c+' (sin cuenta mayor en el balance)',null,0,`H${rowDe[c]}`,an.fRet(c),'El formulario declara este rubro pero el balance no trae cuentas de retención asignadas a él.');
-    if(menosF){const qm=q;linea2('MENOS RTE FTE (devoluciones)',null,-an.pos,`H${rMenos}`,menosF,'Lo que el formulario declara de más frente al movimiento del mes de los rubros con retención devuelta o anulada (calculado por la app), con el signo cambiado.');ws.getCell(qm,2).value=-an.pos;ws.getCell(qm,2).numFmt=XMONEY;ws.getCell(qm,2).font=xf({});}
-    const hasIva=!!(d.ivaC&&(d.ivaC.c131!=null||d.ivaC.c132!=null||d.ivaC.c133!=null));
+    const estPend=(qq,saF)=>({formula:`IF(ABS(D${qq})<=${cTol},"OK",IF(AND((${saF})>${cTol},ABS(D${qq}+(${saF}))<=${cTol}),"Pendiente mes anterior","Revisar"))`});
     const formNet=conceptos.reduce((t,[k2])=>t+fv(k2),0)+menosF;
     const o65=txtB+' de la cuenta 2365, fila '+ro['2365']+' de la hoja «Balance», con el signo cambiado (crédito en positivo).';
-    const tot=(txt,cta,formF,formV,origen)=>{const qq=q;linea2(txt,fCta(cta),vCta(cta),formF,formV,origen,true);
-      if(!mov){const a=bal.find(z=>z.cta===cta)||{sa:0,sf:0},sa=-a.sa,sfv=-a.sf;const x=estPend(qq,fSA([cta]),false);x.result=estadoRetencion(sfv,sa,sfv-sa,formV,false,tol,'sf');ws.getCell(qq,5).value=x;}};
-    if(hasIva)tot('130 · Total retenciones renta ('+(mov?'movimiento':'saldo final')+' cuenta 2365)','2365',`H${r130}`,formNet,o65);
-    else tot('136 · Total retenciones ('+(mov?'movimiento':'saldo final')+' cuenta 2365)','2365',`H${r136}`,formNet+((d.ex&&d.ex.c135)||0),o65);
-    if(hasIva&&ro['2367']){const iv2=d.ivaC||{};
-      if(ro['236704'])linea2('131 · Retención de IVA régimen simple (cuenta 236704)',fCta('236704'),vCta('236704'),`H${rI}`,iv2.c131||0,txtB+' de la cuenta 236704, fila '+ro['236704']+' de la hoja «Balance», con el signo cambiado.');
-      if(ro['236703'])linea2('132 · Retención de IVA a no residentes (cuenta 236703)',fCta('236703'),vCta('236703'),`H${rI+1}`,iv2.c132||0,txtB+' de la cuenta 236703, fila '+ro['236703']+' de la hoja «Balance», con el signo cambiado.');
-      tot('134 · Total retenciones IVA ('+(mov?'movimiento':'saldo final')+' cuenta 2367)','2367',`H${r134}`,(iv2.c131||0)+(iv2.c132||0)-(iv2.c133||0),txtB+' de la cuenta 2367, fila '+ro['2367']+' de la hoja «Balance», con el signo cambiado.');}
-    ws.getCell(q+1,1).value='La columna «Libros» son fórmulas que apuntan '+(mov?'al movimiento del período (columna F menos columna C)':'al saldo final (columna F)')+' de la hoja «Balance»; «Formulario» apunta a los totales de esta hoja. «Pendiente mes anterior» = el saldo final no cuadra, pero el movimiento del mes sí: la diferencia es el saldo anterior sin pagar. Haz clic en una celda para ver de dónde sale.';ws.getCell(q+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
     // --- cuadro de totales: solo las cuentas 2365 y 2367 (si aplica) contra el valor total de la declaración (casilla 136, TOTAL RETENCIONES)
     {const iv3=d.ivaC||{},ivTot=(iv3.c131||0)+(iv3.c132||0)-(iv3.c133||0),timbre=(d.ex&&d.ex.c135)||0,ap67=!!ro['2367']||!!ivTot;   // la 2367 aplica si el balance la trae o el formulario declara IVA retenido
-      q+=3;ws.getCell(q,1).value='Cuadro de totales: cuenta 2365'+(ap67?' y cuenta 2367':'')+' contra el valor total de la declaración';ws.getCell(q,1).font=xf({bold:true});q++;
+      ws.getCell(q,1).value='Cuadro de totales: cuenta 2365'+(ap67?' y cuenta 2367':'')+' contra el valor total de la declaración';ws.getCell(q,1).font=xf({bold:true});ws.getCell(q,8).value='Tolerancia';ws.getCell(q,8).font=xf({size:9});ws.getCell(q,9).value=tol;ws.getCell(q,9).numFmt=XMONEY;ws.getCell(q,9).font=xf({size:9});cTol=`$I$${q}`;q++;
       ['Concepto','Libros','Formulario','Diferencia','Estado'].forEach((t,i)=>{const c=ws.getCell(q,1+i);c.value=t;c.font=xf({bold:true,color:{argb:XC.white}});c.fill=xfill(XC.navy);c.border=BOX;c.alignment={horizontal:i?'center':'left'};});
       ws.getCell(q,7).value='De dónde sale la contabilidad';ws.getCell(q,7).font=xf({bold:true,color:{argb:XC.white}});ws.getCell(q,7).fill=xfill(XC.navy);ws.mergeCells(q,7,q,9);q++;
       const sv=cta=>{const a=bal.find(z=>z.cta===cta)||{sa:0,sf:0};return{sa:-a.sa,sf:-a.sf};};   // saldo anterior y final con el crédito en positivo
@@ -13363,7 +13333,7 @@ function xFormulario(wb,d){
       if(ap67)q2=fila('Cuenta 2367 · Retención de IVA (casilla 134)',ro['2367']?fCta('2367'):null,ro['2367']?vCta('2367'):0,`H${r134}`,ivTot,(ro['2367']?txtB+' de la cuenta 2367, fila '+ro['2367']+' de la hoja «Balance», con el signo cambiado.':'El balance no trae la cuenta 2367 y el formulario declara retención de IVA.')+' Formulario: casilla 134 · total retenciones IVA.',ro['2367']?['2367']:[]);
       const libTot=vCta('2365')+(q2&&ro['2367']?vCta('2367'):0),ctasT=['2365'].concat(q2&&ro['2367']?['2367']:[]);
       fila((ap67?'TOTAL cuentas 2365 + 2367':'TOTAL cuenta 2365')+' · valor total de la declaración (casilla 136)',q2&&ro['2367']?`B${q1}+B${q2}`:`B${q1}`,libTot,`H${r136}`,formNet+ivTot+timbre,'Libros: '+(ap67?'cuenta 2365 + cuenta 2367':'cuenta 2365')+' (arriba). Formulario: casilla 136 · TOTAL RETENCIONES de esta hoja (renta y complementario + IVA + timbre).'+(timbre?' Incluye $'+fm(timbre)+' de timbre nacional (casilla 135), que no está en estas cuentas.':''),ctasT,true);
-      ws.getCell(q+1,1).value='Este cuadro cruza solo '+(ap67?'las cuentas 2365 y 2367':'la cuenta 2365')+' contra el total de retenciones de la declaración, sin el detalle por rubro (que está en el cuadro de arriba).';ws.getCell(q+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});}
+      ws.getCell(q+1,1).value='Este cuadro cruza solo '+(ap67?'las cuentas 2365 y 2367':'la cuenta 2365')+' contra el total de retenciones de la declaración, sin el detalle por rubro.';ws.getCell(q+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});}
   }
 }
 
@@ -13680,22 +13650,14 @@ function xObs(wb,d){
 }
 
 /* ---------- Detalle de validaciones de la app ---------- */
-function xMesa(wb,d,omitir){
-  const om=new Set(omitir||[]);   // validaciones cuyo detalle no se lleva a una hoja propia (el resumen sí las lista)
-  const ws=wb.addWorksheet('Mesa · Resumen',{views:[{showGridLines:false}]});
-  ws.columns=[{width:46},{width:16},{width:120}];
-  hdr(ws,1,['Validación','Estado','Resumen'],XC.navy);
-  (d.results||[]).forEach((r,i)=>{const row=2+i;ws.getCell(row,1).value=r.titulo;ws.getCell(row,2).value=ESTADO_TXT[r.estado];ws.getCell(row,3).value=r.resumen;
-    box(ws,row,1,row,3,{font:xf({}),border:BOX,alignment:{vertical:'middle',wrapText:true}});ws.getCell(row,2).fill=xfill(ESTADO_BG[r.estado]);ws.getCell(row,2).font=xf({bold:true});ws.getCell(row,2).alignment={horizontal:'center',vertical:'middle'};});
-  const usados=new Set(['Mesa · Resumen']);
-  for(const r of d.results||[]){if(!r.rows||!r.rows.length||om.has(r.id))continue;
-    let nom=('Mesa · '+r.titulo.replace(/[\\\/\?\*\[\]:]/g,' ')).slice(0,31);let k=2;while(usados.has(nom)){nom=nom.slice(0,28)+' '+k++;}usados.add(nom);
-    const w=wb.addWorksheet(nom,{views:[{showGridLines:false,state:'frozen',ySplit:1}]});
-    const cols=r.cols&&r.cols.length?r.cols:Object.keys(r.rows[0]);
-    w.columns=cols.map(()=>({width:20}));w.getColumn(1).width=34;
-    hdr(w,1,cols,XC.navy);
-    r.rows.slice(0,5000).forEach((row,i)=>cols.forEach((cname,j)=>{const x=w.getCell(2+i,j+1);const v=row[cname];x.value=v==null?'':v;x.font=xf({});if(typeof v==='number')x.numFmt=XMONEY;}));
-  }
+/* Al Excel solo se lleva el detalle de las retenciones practicadas a autorretenedores o grandes contribuyentes (validación «listados»), que es lo que se le muestra al cliente; el resto de las validaciones se consulta en la app. */
+function xMesa(wb,d){
+  const r=(d.results||[]).find(x=>x.id==='listados');if(!r||!r.rows||!r.rows.length)return;
+  const w=wb.addWorksheet(('Mesa · '+r.titulo.replace(/[\\\/\?\*\[\]:]/g,' ')).slice(0,31),{views:[{showGridLines:false,state:'frozen',ySplit:1}]});
+  const cols=r.cols&&r.cols.length?r.cols:Object.keys(r.rows[0]);
+  w.columns=cols.map(()=>({width:20}));w.getColumn(1).width=34;
+  hdr(w,1,cols,XC.navy);
+  r.rows.slice(0,5000).forEach((row,i)=>cols.forEach((cname,j)=>{const x=w.getCell(2+i,j+1);const v=row[cname];x.value=v==null?'':v;x.font=xf({});if(typeof v==='number')x.numFmt=XMONEY;}));
 }
 
 /* ---------- Tabla de retención en la fuente 2026 (referencia de la revisión) ---------- */
@@ -13703,7 +13665,7 @@ function xTablaRf(wb,d){
   const ws=wb.addWorksheet('Tabla Rte 2026',{views:[{showGridLines:false,state:'frozen',ySplit:4}]});
   ws.columns=[{width:70},{width:48},{width:14},{width:18},{width:18}];
   ws.getCell('A1').value='Tabla de retención en la fuente 2026';ws.getCell('A1').font=xf({bold:true,size:11});
-  ws.getCell('A2').value='UVT 2026: $'+fm(TABLA_RF_UVT)+'. Referencia de las validaciones de tarifas y bases mínimas (hoja «Mesa · Tarifas y bases…»), de la base mínima en UVT y de los gastos sin retención.';ws.getCell('A2').font=xf({size:9});
+  ws.getCell('A2').value='UVT 2026: $'+fm(TABLA_RF_UVT)+'. Referencia de la validación de tarifas y bases mínimas, de la base mínima en UVT y de los gastos sin retención.';ws.getCell('A2').font=xf({size:9});
   hdr(ws,4,['Concepto','Normatividad','Base mínima en UVT','Base mínima en pesos','%'],XC.navy);
   TABLA_RF.forEach((x,i)=>{const r=5+i;[x.c,x.n,x.u==null?'':x.u,x.pe,x.t].forEach((v,c)=>{const cell=ws.getCell(r,c+1);cell.value=v;cell.font=xf({size:c===1?8:9});cell.alignment={wrapText:true,vertical:'middle',horizontal:c>=2?'right':'left'};});box(ws,r,1,r,5,{border:BOX});});
   ws.autoFilter={from:{row:4,column:1},to:{row:4+TABLA_RF.length,column:5}};
@@ -13777,10 +13739,42 @@ function xAutorret(wb,d){
 }
 
 /* ---------- Libro completo ---------- */
+/* ---------- Imagen de la declaración a la izquierda de los datos de la hoja «Formulario» ---------- */
+/* Las páginas del PDF (o la imagen) de la declaración se guardan al cargarla (formImgs: base64, ancho y alto). Al armar el Excel, la hoja «Formulario» se corre IMG_COLS columnas a la derecha y las imágenes quedan en las columnas A a K,
+   una debajo de otra. Al correr la hoja se reescriben las fórmulas: las de la propia hoja (referencias sin hoja) y las de cualquier otra hoja que apunte a ella («Formulario!B5»); así las cifras no cambian. */
+const IMG_COLS=12,IMG_ANCHO=820;
+function colNum(s){let n=0;for(const ch of s)n=n*26+ch.charCodeAt(0)-64;return n;}
+/* Corre n columnas las referencias de una fórmula. propia = la fórmula está en la hoja que se corre (se corren las referencias sin hoja y las que dicen su nombre); si no, solo las que dicen el nombre de esa hoja. */
+function desplazarFormula(f,n,hoja,propia){
+  const sh=s=>s?s.slice(0,-1).replace(/^'|'$/g,'').replace(/''/g,"'"):null,mueve=s=>s==null?propia:sh(s)===hoja,ant=(str,off)=>off>0&&/[A-Za-z0-9_.$]/.test(str[off-1]);
+  const celda=/((?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]{1,3})(\$?)(\d+)(?::(\$?)([A-Z]{1,3})(\$?)(\d+))?(?![A-Za-z0-9_(])/g;
+  const colu=/((?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]{1,3}):(\$?)([A-Z]{1,3})(?![A-Za-z0-9_(])/g;
+  return String(f).split(/("(?:[^"]|"")*")/).map((p,i)=>i%2?p:p
+    .replace(celda,(m,s,d1,c1,d2,r1,d3,c2,d4,r2,off,str)=>{if(ant(str,off)||!mueve(s))return m;return (s||'')+d1+colLetra(colNum(c1)+n-1)+d2+r1+(c2?':'+d3+colLetra(colNum(c2)+n-1)+d4+r2:'');})
+    .replace(colu,(m,s,d1,c1,d2,c2,off,str)=>{if(ant(str,off)||!mueve(s))return m;return (s||'')+d1+colLetra(colNum(c1)+n-1)+':'+d2+colLetra(colNum(c2)+n-1);})).join('');
+}
+/* Corre la hoja n columnas a la derecha (valores, estilos, combinaciones y anchos) y reescribe las fórmulas de todo el libro que apuntan a ella. */
+function correrHoja(wb,ws,n){
+  const nombre=ws.name,esEsclava=c=>c.isMerged&&c.master&&c.master.address!==c.address;
+  wb.worksheets.forEach(w=>w.eachRow({includeEmpty:false},row=>row.eachCell({includeEmpty:false},c=>{if(esEsclava(c))return;const v=c.value;if(v&&typeof v==='object'&&typeof v.formula==='string')c.value=Object.assign({},v,{formula:desplazarFormula(v.formula,n,nombre,w===ws)});})));
+  const merges=Object.values(ws._merges||{}).map(m=>m.model);merges.forEach(m=>ws.unMergeCells(m.top,m.left,m.bottom,m.right));
+  const maxC=Math.max(ws.columnCount,(ws.columns||[]).length),maxR=ws.rowCount,anchos=[];for(let c=1;c<=maxC;c++)anchos[c]=ws.getColumn(c).width;
+  for(let r=1;r<=maxR;r++){const row=ws.getRow(r);for(let c=maxC;c>=1;c--){const s=row.getCell(c);const vacia=(s.value===null||s.value===undefined)&&!Object.keys(s.style||{}).length;if(vacia)continue;const t=row.getCell(c+n);t.value=s.value;t.style=JSON.parse(JSON.stringify(s.style||{}));s.value=null;s.style={};}}
+  merges.forEach(m=>ws.mergeCells(m.top,m.left+n,m.bottom,m.right+n));
+  for(let c=1;c<=maxC;c++)if(anchos[c]!=null)ws.getColumn(c+n).width=anchos[c];
+}
+function agregarImagenesForm(wb,imgs){
+  const ws=wb.getWorksheet('Formulario');if(!ws||!imgs||!imgs.length)return;
+  correrHoja(wb,ws,IMG_COLS);for(let c=1;c<IMG_COLS;c++)ws.getColumn(c).width=10;ws.getColumn(IMG_COLS).width=2.5;
+  let y=0;   // píxeles desde la primera fila: la siguiente imagen empieza en la primera fila que queda por debajo de la anterior
+  for(const im of imgs){const w=IMG_ANCHO,h=Math.round(im.h*w/im.w);let fila=0,acum=0;while(acum<y){acum+=Math.round((ws.getRow(fila+1).height||15)*4/3);fila++;}
+    ws.addImage(wb.addImage({base64:im.b64,extension:im.ext||'png'}),{tl:{col:0,row:fila},ext:{width:w,height:h}});y=acum+h+12;}
+}
 function buildPapelTrabajo(ExcelJS,d){
   const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
   const conAuto=autoTotales(d.auto).tiene;
-  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xTablaRf(wb,d);xFormulario(wb,d);if(conAuto)xAutorret(wb,d);xBalance(wb,d);xVerif(wb,d);if(d.salTodos&&d.salTodos.length)xArt383(wb,d);xDianRec(wb,d);xDianDS(wb,d);if(conAuto)xDianEmi(wb,d);xMov(wb,d);xObs(wb,d);xMesa(wb,d,['fechas','oportunidad','autorret']);
+  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xTablaRf(wb,d);xFormulario(wb,d);if(conAuto)xAutorret(wb,d);xBalance(wb,d);xVerif(wb,d);if(d.salTodos&&d.salTodos.length)xArt383(wb,d);xDianRec(wb,d);xDianDS(wb,d);if(conAuto)xDianEmi(wb,d);xMov(wb,d);xObs(wb,d);xMesa(wb,d);
+  agregarImagenesForm(wb,d.formImgs);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
 }
@@ -13789,7 +13783,7 @@ function borradorConclusion(d){
   const pend=R.filter(r=>r.estado==='err'||r.estado==='warn');const ok=R.filter(r=>r.estado==='ok').length;
   const corto=r=>r.titulo.replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim().toLowerCase();
   let t='BORRADOR (revisar y completar): Se verificó la retención en la fuente y la retención de IVA de '+per+' (cuentas 2365 y 2367) contra el borrador del formulario 350, los libros auxiliares y los reportes de la DIAN. '+ok+' de '+R.length+' validaciones automáticas no presentan hallazgos.';
-  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle está en las hojas «Mesa».';
+  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle de cada validación se consulta en la app.';
   else t+=' No quedan hallazgos pendientes en las validaciones automáticas.';
   return t;
 }
@@ -13912,7 +13906,7 @@ function xFormularioRica(wb,d){
     ws.getCell(row,3).value=origenTxt;ws.getCell(row,3).font=xf({size:8,color:{argb:'FF595959'}});ws.mergeCells(row,3,row,6);ws.getCell(row,3).alignment={wrapText:true,vertical:'middle'};};
   fila(ra,'Saldo anterior de la cuenta 2368 (por pagar)',ro['2368']?`-Balance!C${ro['2368']}`:null,saAnt,ro['2368']?'Saldo anterior (columna C) de la cuenta 2368, celda C'+ro['2368']+' de la hoja «Balance», con el signo invertido.':'Sin balance cargado.');
   fila(rp,'Pago a la Secretaría de Hacienda (débitos de la cuenta '+pagoCta+')',pg&&ro[pg.cta]?`Balance!D${ro[pg.cta]}`:null,pagoDeb,pg&&ro[pg.cta]?'Débitos (columna D) de la cuenta '+pg.cta+', celda D'+ro[pg.cta]+' de la hoja «Balance».':'La cuenta '+pagoCta+' no aparece en el balance.');
-  fila(rdd,'Diferencia (pago − saldo anterior)',(ro['2368']&&pg&&ro[pg.cta])?`B${rp}-B${ra}`:null,pagoDeb-saAnt,'Si no es cero, hay saldos o asientos de períodos anteriores sin conciliar (ver hoja «Mesa · Saldos de las cuentas»).',true);
+  fila(rdd,'Diferencia (pago − saldo anterior)',(ro['2368']&&pg&&ro[pg.cta])?`B${rp}-B${ra}`:null,pagoDeb-saAnt,'Si no es cero, hay saldos o asientos de períodos anteriores sin conciliar.',true);
   ws.getCell(rdd+2,1).value='Las cifras de contabilidad son fórmulas que apuntan a las hojas «Balance» y «Verificacion»: haz clic en una celda para ver de dónde sale. Si corriges un valor del borrador o del balance, los cruces se actualizan.';ws.getCell(rdd+2,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
 }
 function xVerifRica(wb,d){
@@ -13935,15 +13929,17 @@ function xVerifRica(wb,d){
     r++;}
   if(r===2){ws.getCell(2,1).value='Sin auxiliar de retención de ICA cargado.';ws.getCell(2,1).font=xf({italic:true});}
   ws.autoFilter={from:{row:1,column:1},to:{row:Math.max(r-1,2),column:12}};
+  // --- suma de base y retención contra el formulario: debajo de la tabla, bajo las columnas BASE (H) y Crédito (I)
   const k=((d.form&&d.form.casillas)||{});const nB=L.reduce((t,x)=>t+(x.base||0),0),nR=L.reduce((t,x)=>t+(x.ret>0?x.ret:0),0);
-  ws.getCell('N5').value='Base (6)';ws.getCell('O5').value='Rte ICA (7)';ws.getCell('N5').font=xf({bold:true});ws.getCell('O5').font=xf({bold:true});
-  ws.getCell(6,13).value='Contabilidad';ws.getCell(7,13).value='Formulario';ws.getCell(8,13).value='Diferencia';[6,7,8].forEach(x=>ws.getCell(x,13).font=xf({bold:true}));
-  const cel=(addr,formula,result)=>{const x=ws.getCell(addr);x.value=formula?{formula,result}:null;x.numFmt=XMONEY;x.font=xf({});};
-  cel('N6',L.length?`SUM(H2:H${r-1})`:null,Math.round(nB));cel('O6',L.length?`SUMIF(I2:I${r-1},">0")`:null,nR);
-  cel('N7',k.BR!=null?'Formulario!B5':null,k.BR);cel('O7',k.RP!=null?'Formulario!B6':null,k.RP);
-  ['N','O'].forEach(c=>{const x=ws.getCell(c+'8');x.value={formula:`${c}7-${c}6`};x.numFmt=XMONEY;x.font=xf({bold:true});});
-  ws.getCell('M9').value='Contabilidad: base = suma de la columna H; Rte ICA = suma de los créditos positivos de la columna I (las devoluciones, en negativo, van en el renglón 8). Formulario = renglones 6 y 7 de la hoja «Formulario».';ws.getCell('M9').font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
-  ws.getColumn(13).width=14;ws.getColumn(14).width=18;ws.getColumn(15).width=18;
+  const q=r+3,rc=q+2,rf2=q+3,rd2=q+4;
+  ws.getCell(q,1).value='Suma de base y retención contra el formulario 131';ws.getCell(q,1).font=xf({bold:true});
+  [[8,'Base (6)'],[9,'Rte ICA (7)']].forEach(([c,t])=>{const x=ws.getCell(q+1,c);x.value=t;x.font=xf({bold:true,color:{argb:XC.white}});x.fill=xfill(XC.navy);x.border=BOX;x.alignment={horizontal:'center'};});
+  [[rc,'Contabilidad (suma de la tabla de arriba)'],[rf2,'Formulario 131'],[rd2,'Diferencia (formulario − contabilidad)']].forEach(([f,t])=>{const x=ws.getCell(f,6);x.value=t;x.font=xf({bold:true});x.alignment={horizontal:'right'};});
+  const cel=(f,c,formula,result,bold)=>{const x=ws.getCell(f,c);x.value=formula?{formula,result}:null;x.numFmt=XMONEY;x.font=xf({bold:!!bold});x.border=BOX;};
+  cel(rc,8,L.length?`SUM(H2:H${r-1})`:null,Math.round(nB));cel(rc,9,L.length?`SUMIF(I2:I${r-1},">0")`:null,nR);
+  cel(rf2,8,k.BR!=null?'Formulario!B5':null,k.BR);cel(rf2,9,k.RP!=null?'Formulario!B6':null,k.RP);
+  [8,9].forEach(c=>{const L2=String.fromCharCode(64+c);const x=ws.getCell(rd2,c);x.value={formula:`${L2}${rf2}-${L2}${rc}`};x.numFmt=XMONEY;x.font=xf({bold:true});x.border=BOX;});
+  ws.getCell(rd2+1,1).value='Contabilidad: base = suma de la columna H de la tabla; Rte ICA = suma de los créditos positivos de la columna I (las devoluciones, en negativo, van en el renglón 8). Formulario = renglones 6 y 7 de la hoja «Formulario».';ws.getCell(rd2+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
   ws.getCell(r+1,1).value='Filas en verde: documentos de la muestra sugerida por la app. Observaciones en rojo: alertas de las revisiones automáticas.';ws.getCell(r+1,1).font=xf({size:8,italic:true,color:{argb:'FF7F7F7F'}});
 }
 function flagsRica(results){
@@ -13958,7 +13954,7 @@ function borradorConclusionRica(d){
   const pend=R.filter(r=>r.estado==='err'||r.estado==='warn');const ok=R.filter(r=>r.estado==='ok').length;
   const corto=r=>r.titulo.replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim().toLowerCase();
   let t='BORRADOR (revisar y completar): Se verificó la retención de industria y comercio de '+per+' (cuenta 2368) contra el borrador del formulario 131, el balance, el movimiento contable y el auxiliar de retenciones con base. '+ok+' de '+R.length+' validaciones automáticas no presentan hallazgos.';
-  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle está en las hojas «Mesa».';
+  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle de cada validación se consulta en la app.';
   else t+=' No quedan hallazgos pendientes en las validaciones automáticas.';
   return t;
 }
@@ -13978,7 +13974,8 @@ function datosPapelRica(ctx,results,extra){
 }
 function buildPapelRica(ExcelJS,d){
   const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre||'HB Consultores S.A.S.')+' · Revisión de impuestos';wb.created=new Date();
-  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xFormularioRica(wb,d);xBalance(wb,d);xVerifRica(wb,d);xObs(wb,d);xMesa(wb,d,['formulario','pago','oportunidad','cuadre','detalle']);
+  xDatos(wb,d);xCheck(wb,d);xFijos(wb,d);xFormularioRica(wb,d);xBalance(wb,d);xVerifRica(wb,d);xObs(wb,d);xMesa(wb,d);
+  agregarImagenesForm(wb,d.formImgs);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
 }
@@ -14114,7 +14111,7 @@ function borradorConclusionIca(d){
   const pend=R.filter(r=>r.estado==='err'||r.estado==='warn'),ok=R.filter(r=>r.estado==='ok').length;
   const corto=r=>r.titulo.replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim().toLowerCase();
   let t='BORRADOR (revisar y completar): Se verificó el impuesto de industria y comercio de '+p+' contra el balance, el movimiento contable y los anexos de retenciones y certificados. '+ok+' de '+R.length+' validaciones automáticas no presentan hallazgos.';
-  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle está en las hojas «Mesa».';
+  if(pend.length)t+=' Pendientes de resolver o confirmar: '+pend.slice(0,10).map(corto).join('; ')+'. El detalle de cada validación se consulta en la app.';
   else t+=' No quedan hallazgos pendientes en las validaciones automáticas.';
   return t;
 }
@@ -14134,6 +14131,7 @@ function datosPapelIca(ctx,results,extra){
 function buildPapelIca(ExcelJS,d){
   const wb=new ExcelJS.Workbook();wb.creator=(d.firmaNombre?d.firmaNombre+' · ':'')+'Revisión de impuestos';wb.created=new Date();
   xDatos(wb,d);xPeriodicidadIca(wb,d);xCheck(wb,d);xFijos(wb,d);xFormularioIca(wb,d);xBalance(wb,d);xVerificacionIca(wb,d);xAnexoIca(wb,d);xIngresosMunIca(wb,d);xDevolIca(wb,d);xObs(wb,d);xMesa(wb,d);
+  agregarImagenesForm(wb,d.formImgs);
   wb.worksheets.forEach(ws=>{ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.3,footer:0.3}};});
   return wb;
 }
@@ -14286,6 +14284,12 @@ async function pdfLines(f){
   }
   return lines;
 }
+/* La imagen de la declaración (las páginas del PDF o la propia imagen) se guarda al cargarla para ponerla a la izquierda de los datos de la hoja «Formulario» del Excel. Si algo falla, el Excel sale sin imagen. */
+async function guardarImagenesForm(obj,f,maxPag){   // maxPag: la declaración de retención en la fuente trae 2 páginas como máximo; la de ReteICA, 1
+  try{if(!obj||!f||typeof createImageBitmap!=='function')return;const bl=await toImages(f,maxPag||2),out=[];
+    for(const b of bl){const bm=await createImageBitmap(b);out.push({b64:await b64(b),ext:/jpe?g/i.test(b.type)?'jpeg':'png',w:bm.width,h:bm.height});if(bm.close)bm.close();}
+    if(out.length)obj.imgs=out;}catch(e){}
+}
 async function toImages(f,maxPages){
   if(/^image\//.test(f.type))return[f];
   if(!pdfOk())throw new Error('lector');
@@ -14339,7 +14343,7 @@ function aplicar350(r,f,via){
   if(r.casillasDudosas.length)partes.push('casillas de baja confianza: '+r.casillasDudosas.join(', '));
   const aT=autoTotales(r.auto);if(aT.tiene)partes.push('trae autorretenciones: se cruzan los ingresos con la DIAN y la cuenta 41');
   const ot=otrosTexto(r.map);if(ot)partes.push(ot);
-  S.data.form={names:[f.name],parsed:r,info:via+' · '+partes.join(' · ')+' · verifica los valores',warn:!r.okTodo||r.faltantes.length>0||r.casillasDudosas.length>0};
+  S.data.form={names:[f.name],parsed:r,info:via+' · '+partes.join(' · ')+' · verifica los valores',warn:!r.okTodo||r.faltantes.length>0||r.casillasDudosas.length>0};guardarImagenesForm(S.data.form,f,2);
 }
 async function loadForm350Ocr(f){
   S.data.form={names:[f.name],busy:'Leyendo el formulario…'};render();
@@ -14400,7 +14404,7 @@ async function loadForm350Image(f){
     S.ex={c135:j.timbre_135==null?null:j.timbre_135,c137:j.sanciones_137==null?null:j.sanciones_137};S.auto={};S.cas=casDesdeForm(S.form,{});
     const okIva=j.iva_total==null||S.iva==null||Math.abs(S.iva-j.iva_total)<=2000;
     const okTot=j.total_retenciones==null||Math.abs(total136()-j.total_retenciones)<=2000;
-    S.data.form={names:[f.name],parsed:{form},info:'Leído con lectura asistida · '+(ok?'la suma de las casillas coincide con el total del formulario':'la suma de las casillas NO coincide con el total del formulario: corrige la tabla')+(okIva?'':' · las casillas de IVA no suman la casilla 134')+(okTot?'':' · la casilla 136 no coincide con 130 + 134 + 135')+(dudas?' · '+dudas+' casillas dudosas':'')+' · verifica los valores',warn:!ok||!okIva||!okTot||dudas>0};
+    S.data.form={names:[f.name],parsed:{form},info:'Leído con lectura asistida · '+(ok?'la suma de las casillas coincide con el total del formulario':'la suma de las casillas NO coincide con el total del formulario: corrige la tabla')+(okIva?'':' · las casillas de IVA no suman la casilla 134')+(okTot?'':' · la casilla 136 no coincide con 130 + 134 + 135')+(dudas?' · '+dudas+' casillas dudosas':'')+' · verifica los valores',warn:!ok||!okIva||!okTot||dudas>0};guardarImagenesForm(S.data.form,f,2);
   }catch(e){
     const c=e&&e.code;
     fail(c==='bad_code'?'El código de acceso del servicio no es válido. Revísalo en el panel de abajo.':c==='worker'?'El servicio respondió con un error'+(e.msg?': '+e.msg:'')+'.':(e instanceof TypeError)?'No pude conectar con el servicio de lectura. Revisa la dirección y tu conexión.':c==='not_granted'?'No autorizaste el uso de la lectura asistida. Diligencia la tabla a mano o vuelve a intentarlo y acepta.':c==='images_unavailable'?'Esta publicación no tiene habilitado el envío de imágenes a la lectura asistida.':c==='rate_limited'?'Demasiadas solicitudes a la lectura asistida. Espera un momento.':'La lectura asistida no pudo leer el formulario con claridad. Diligencia la tabla a mano.');
@@ -15187,6 +15191,7 @@ async function loadForm131(f){
   if(bim&&r.anio){const id=r.anio+'-B'+bim;if(id!==S.per.reteica&&periodosActual(cur()).some(p=>p.id===id)){S.per.reteica=id;S.rica.key=periodoKey('reteica',id);cambio=' · período cambiado al bimestre '+bim+' de '+r.anio+', el marcado en el borrador';}}
   const n=F131.filter(k=>r.casillas[k]!=null).length;
   D.f131={names:[f.name],parsed:r,info:n+' de 9 renglones leídos '+desde+(r.faltantes.length?' · faltan: '+r.faltantes.join(', '):' · verifica los valores contra el PDF')+(bim?' · bimestre marcado: '+bim+cambio:' · no pude detectar el bimestre marcado'),warn:r.faltantes.length>0||r.dudosas.length>0};
+  guardarImagenesForm(D.f131,f,1);
 }
 async function loadSlotR(k,files){if(k==='f131'&&files.length){await loadForm131(files[0]);return;}await loadSlot(k,files);}
 function prevDeclR(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const b=bimInfo(S.per.reteica),c=cur();const pp=b&&c.periods[periodoKey('reteica',b.prevId)];return pp&&pp.declarado?pp.declarado.total:null;}
@@ -15226,6 +15231,7 @@ async function downloadRica(){
   try{
     const p=pdata();const ctx=buildCtxR(),D=S.rica.data;
     const d=datosPapelRica(ctx,S.rica.results,{ck:p.ck,cierre:p.cierre,loaded:{bal:!!(D.bal&&D.bal.parsed),f131:hasF131(),led:!!(D.led&&D.led.parsed),det:!!(D.det&&D.det.parsed)}});
+    d.formImgs=(D.f131&&D.f131.imgs)||[];
     const wb=buildPapelRica(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
     await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel de la retención de ICA.');}
@@ -15309,7 +15315,7 @@ async function loadFormIcaDoc(f){
     r=parseFormIcaOcr(o);if(r.err){fail(r.err+' Diligencia la tabla a mano.');return;}via='lectura de la imagen, el PDF no trae texto';
   }
   const info=aplicarFormIca(c,r,via);
-  D.formx={names:[f.name],parsed:r,info,warn:!!(r.dudosas&&r.dudosas.length)};
+  D.formx={names:[f.name],parsed:r,info,warn:!!(r.dudosas&&r.dudosas.length)};guardarImagenesForm(D.formx,f,2);
 }
 async function loadSlotI(k,files){
   if(k==='formx'&&files.length&&/\.(pdf|png|jpe?g)$/i.test(files[0].name)){await loadFormIcaDoc(files[0]);return;}
@@ -15375,6 +15381,7 @@ async function downloadIca(){
   try{
     const p=pdata(),ctx=buildCtxI(),D=S.ica.data;
     const d=datosPapelIca(ctx,S.ica.results,{ck:p.ck,cierre:p.cierre,loaded:{bal:!!(D.bal&&D.bal.parsed),led:!!(D.led&&D.led.parsed),det:!!(D.det&&D.det.parsed),cert:!!(D.cert&&D.cert.parsed),form:hasFormIca()}});
+    d.formImgs=(D.formx&&D.formx.imgs)||[];
     const wb=buildPapelIca(window.ExcelJS,marcaFirma(d));const buf=await wb.xlsx.writeBuffer();
     await saveFile(d.nombreArchivo,new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
   }catch(e){console.error(e);toast('No pude generar el Excel del ICA.');}
@@ -15414,7 +15421,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega63';
+const APP_ENTREGA='fase4b-entrega64';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -15572,6 +15579,7 @@ async function download(){
   try{
     const p=pdata();const ctx=buildCtx();
     const d=datosPapel(ctx,S.results,{apl:aplFlags(),form:S.form,auto:S.auto,cas:S.cas,ivaC:S.ivaC,ex:S.ex,ck:p.ck,cierre:p.cierre,movRaw:(S.data.led&&S.data.led.parsed&&S.data.led.parsed.movRaw)||null,loaded:{bal:!!(S.data.bal&&S.data.bal.parsed),form:hasForm(),led:!!(S.data.led&&S.data.led.parsed),det:!!(S.data.det&&S.data.det.parsed),dian:!!(S.data.dian&&S.data.dian.parsed),nom:!!(S.data.nom&&S.data.nom.parsed)}});
+    d.formImgs=(S.data.form&&S.data.form.imgs)||[];
     const wb=buildPapelTrabajo(window.ExcelJS,marcaFirma(d));
     const buf=await wb.xlsx.writeBuffer();
     await saveFile(nombreArchivo(d),new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);
