@@ -1809,6 +1809,8 @@ function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar co
     try{if(!parseLibroMayorSap(rows).err)return{slot:'led',parece:'libro mayor de SAP Business One'};}catch(e){}
     try{if(!parseMovimientoDobleCodigo(rows).err)return{slot:'led',parece:'movimiento con doble código de cuenta (NIIF y local)'};}catch(e){}
     try{if(!parseInformeBasesBloques(rows).err)return{slot:'det',parece:'informe de bases de impuestos por tarifa'};}catch(e){}
+    try{if(!parseRelacionSiesa(rows).err)return{slot:'det',parece:'relación de retenciones de Siesa'};}catch(e){}
+    try{if(!parseMovimientoSiesa(rows).err)return{slot:'led',parece:'movimiento de cuentas de Siesa'};}catch(e){}
     try{if(!parseBalanceNombreCompuesto(rows).err)return{slot:'bal',parece:'código y nombre en una columna'};}catch(e){}
     try{if(!parseAnexoResumen(rows).err)return{slot:'det',parece:'anexo de retención del cliente (resumen por cuenta)'};}catch(e){}
     try{if(!parseComprobantesDetallados(rows).err)return{slot:'led',parece:'comprobantes detallados del programa contable'};}catch(e){}
@@ -1931,7 +1933,57 @@ function parseAnexoResumen(rows){
   if(!resumen.length)return{err:'No encontré cuentas de retención en el anexo.'};
   return{rows:[],resumen,total,anexoResumen:true,empresa,nit,corte,formato:'anexo de retención del cliente (resumen por cuenta, personas jurídicas y naturales; sin detalle por tercero)'};
 }
-function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const cd=parseComprobantesDetallados(rows);if(!cd.err)return cd;const ms=parseMovimientoSalud(rows);if(!ms.err)return ms;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
+/* ===== Siesa Enterprise Net: «Movimiento de cuentas» y «Relación de retenciones» ===== */
+/* El movimiento trae una línea por asiento: Fecha (número de Excel), Auxiliar (cuenta de 8 dígitos), SUBCUENTA, Docto. («DSF-00006160»), tercero, NIT, centros, Desc. auxiliar (el nombre de la cuenta, con la tarifa), Débitos, Créditos, Neto y Notas.
+   No trae base: se estima como retención ÷ tarifa del nombre de la cuenta cuando la trae. */
+function parseMovimientoSiesa(rows){
+  const nz=s=>norm(String(s==null?'':s)),tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,15)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    if(f('fecha')>=0&&f('auxiliar')>=0&&f('docto')>=0&&f('nit movto')>=0&&f('debitos')>=0&&f('creditos')>=0){hi=i;c={fec:f('fecha'),cta:f('auxiliar'),doc:f('docto'),ter:f('razon social tercero movto'),nit:f('nit movto'),co:f('c o movto'),cc:f('c costo'),nom:f('desc auxiliar'),deb:f('debitos'),cre:f('creditos'),nota:f('notas'),pre:f('prefijo tipo docto')};}}
+  if(hi<0)return{err:'No encontré el encabezado del movimiento de Siesa (Fecha, Auxiliar, Docto., Nit movto., Débitos, Créditos).'};
+  const out=[];let conBase=0;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],cta=tx(r[c.cta]);if(!/^\d{4,}$/.test(cta))continue;   // «Gran total» y las filas vacías no son asientos
+    const deb=num(r[c.deb])||0,cre=num(r[c.cre])||0,nom=tx(r[c.nom]),nit=tx(r[c.nit]),f=r[c.fec],fecha=typeof f==='number'?serialAFecha(f):tx(f),a=cre-deb;
+    let t=null,milesimas=false;if(/^236[58]/.test(cta)&&a){if(/^2368/.test(cta)){t=tarifaMil(nom);milesimas=true;}else t=tarifaSalud('',nom);}
+    const base=t?a/(t/(milesimas?1000:100)):null;if(base!=null)conBase++;
+    out.push({fecha,doc:tx(r[c.doc]),cta,nom,ter:/^\d+$/.test(nit)?nit:nit.toUpperCase(),terRaw:nit,terN:c.ter>=0?tx(r[c.ter]):'',desc:c.nota>=0?tx(r[c.nota]):'',cc:c.cc>=0?tx(r[c.cc]):'',co:c.co>=0?tx(r[c.co]):'',fuente:c.pre>=0?tx(r[c.pre]):'',deb,cre,base,ret:null,baseEstimada:base!=null||undefined});}
+  if(!out.length)return{err:'No encontré asientos en el movimiento de Siesa.'};
+  return{rows:out,hasBase:conBase>0,baseEstimada:conBase>0,formato:'movimiento de cuentas de Siesa Enterprise Net'+(conBase?' (sin base en el reporte: se estima como retención ÷ tarifa del nombre de la cuenta)':'')};
+}
+/* La relación de retenciones agrupa por concepto («Concepto: 23650501-RETENCION SALARIO…», «Tasa: 4,00») y lista un tercero por fila: NIT, nombre, Tipo Tercero (P_Natural o P_Juridica), Vlr base, Vlr retención y %Real;
+   cada concepto termina con una fila TOTAL. Es un resumen por tercero (no por documento) con la base REAL: se une con el movimiento (enriquecerSiesa). */
+function parseRelacionSiesa(rows){
+  const nz=s=>norm(String(s==null?'':s)),tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();let hi=-1,c=null;
+  for(let i=0;i<Math.min((rows||[]).length,40)&&hi<0;i++){const t=(rows[i]||[]).map(nz),f=k=>t.indexOf(k);
+    if(f('nit cc')>=0&&f('tipo tercero')>=0&&f('vlr base')>=0&&f('vlr retencion')>=0){hi=i;c={nit:f('nit cc'),nom:f('razon social nombre'),tp:f('tipo tercero'),base:f('vlr base'),ret:f('vlr retencion'),pct:f('real')>=0?f('real'):t.findIndex(x=>/real$/.test(x))};}}
+  if(hi<0)return{err:'No encontré el encabezado de la relación de retenciones de Siesa (NIT/CC, Tipo Tercero, Vlr base, Vlr retención).'};
+  let empresa='',nit='',corte,cta='',nomCta='',tasa=null;const out=[],totales={};
+  for(let i=0;i<hi;i++){const r=rows[i]||[],v=tx(r[0]);if(!v)continue;if(!empresa&&!/^\d/.test(v)&&!/^(desde|hasta)/i.test(v))empresa=v;else if(!nit&&/^\d[\d.\-]+$/.test(v))nit=v;const m=/^desde:?$/i.test(v)?/(\S+)\/(\d{4})/.exec(tx(r[hi>0?1:1])):null;if(m&&BCE_MESES[norm(m[1])])corte=m[2]+'-'+String(BCE_MESES[norm(m[1])]).padStart(2,'0');}
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],a=tx(r[0]);
+    if(/^concepto:?$/i.test(a)){const m=/^(\d{4,})\s*[-–]\s*(.*)$/.exec(tx(r[2]));cta=m?m[1]:'';nomCta=m?m[2]:tx(r[2]);tasa=num(r[7]);continue;}
+    if(/^total$/i.test(a)){if(cta)totales[cta]={base:num(r[c.base])||0,ret:num(r[c.ret])||0};cta='';continue;}   // lo que sigue al TOTAL de un concepto (resumen, pie) ya no es de ese concepto
+    if(!cta||!/^[A-Za-z0-9]{4,}$/.test(a)||num(r[c.base])==null)continue;
+    const tp=/jur/i.test(tx(r[c.tp]))?'PJ':/nat/i.test(tx(r[c.tp]))?'PN':null,ret=num(r[c.ret])||0;
+    out.push({cta,nom:nomCta,ter:/^\d+$/.test(a)?a:a.toUpperCase(),terRaw:a,terN:tx(r[c.nom]),tp,base:num(r[c.base])||0,ret,tasa:c.pct>=0?num(r[c.pct]):null,tasaConcepto:tasa,deb:0,cre:ret,doc:'',fecha:''});}
+  if(!out.length)return{err:'No encontré terceros con retención en la relación de Siesa.'};
+  const avisos=[];for(const k of Object.keys(totales)){const s=out.filter(x=>x.cta===k).reduce((t,x)=>t+x.ret,0);if(Math.abs(s-totales[k].ret)>1)avisos.push('el total del concepto '+k+' no coincide con la suma de sus terceros');}
+  return{rows:out,hasBase:true,relacionSiesa:true,empresa,nit,corte,totales,avisos,formato:'relación de retenciones de Siesa Enterprise Net (por concepto y tercero, con base real y tipo de tercero; sin documentos: se une con el movimiento)'};
+}
+/* Une la relación con el movimiento (en copias): por cuenta y NIT, la retención del movimiento debe sumar la de la relación; si es así, la base REAL de la relación se reparte entre las líneas del movimiento en proporción a su retención
+   y cada línea toma el tipo de tercero del programa. Lo que no cuadra se deja con la base estimada y se informa. */
+function enriquecerSiesa(o){
+  const led=o&&o.led,det=o&&o.det;if(!(det&&det.relacionSiesa&&det.rows&&led&&led.rows))return{led,det,info:{}};
+  const clave=(cta,ter)=>cta+'|'+String(ter).toUpperCase(),grupos=new Map(),porRel=new Map();
+  led.rows.forEach((r,i)=>{if(!/^236[58]/.test(r.cta)||r.pago||/por pagar|a pagar/i.test(r.nom))return;const k=clave(r.cta,r.ter),g=grupos.get(k)||{ret:0,idx:[]};g.ret+=r.cre-r.deb;g.idx.push(i);grupos.set(k,g);});
+  for(const d of det.rows)porRel.set(clave(d.cta,d.ter),d);
+  const rows=led.rows.slice();let unidos=0,lineas=0,difieren=[],sinMov=0;
+  for(const [k,d] of porRel){const g=grupos.get(k);if(!g){sinMov++;continue;}
+    if(Math.abs(g.ret-d.ret)>Math.max(2,Math.abs(d.ret)*0.001)||!d.ret){difieren.push({cta:d.cta,ter:d.ter,terN:d.terN,movimiento:g.ret,relacion:d.ret});continue;}
+    unidos++;for(const i of g.idx){const r=rows[i],a=r.cre-r.deb;lineas++;rows[i]=Object.assign({},r,{base:a*d.base/d.ret,baseEstimada:undefined,baseAsignada:true,tp:d.tp||r.tp,tasaReal:d.tasa});}}
+  const sinRel=[...grupos.keys()].filter(k=>!porRel.has(k)&&/^2365/.test(k)).length;
+  return{led:Object.assign({},led,{rows,hasBase:true,baseEstimada:rows.some(r=>r.baseEstimada)}),det:null,info:{siesaUnidos:unidos,siesaLineas:lineas,siesaDifieren:difieren,siesaRelacionSinMovimiento:sinMov,siesaMovimientoSinRelacion:sinRel}};
+}
+function parseLedger(rows){const sg=parseLedgerSiigo(rows);if(!sg.err)return sg;const nb=parseMovimientoNube(rows);if(!nb.err)return nb;const mc=parseMovimientoCuentaNube(rows);if(!mc.err)return mc;const tp=parseTercerosPorCuenta(rows);if(!tp.err)return tp;const cd=parseComprobantesDetallados(rows);if(!cd.err)return cd;const sm=parseMovimientoSiesa(rows);if(!sm.err)return sm;const ms=parseMovimientoSalud(rows);if(!ms.err)return ms;const lm=parseLibroMayorSap(rows);if(!lm.err)return lm;const dc=parseMovimientoDobleCodigo(rows);if(!dc.err)return dc;const std=parseLedgerEstandar(rows);if(!std.err)return std;const alt=parseAuxiliarReporte(rows);if(!alt.err)return alt;const mov=parseMovimientoCuentas(rows);return mov.err?std:mov;}
 function parseLedgerEstandar(rows){
   const h=findHeader(rows,c=>c.some(x=>x.startsWith('documento'))&&c.some(x=>x.startsWith('cuenta'))&&((c.some(x=>x.startsWith('debito'))&&c.some(x=>x.startsWith('credito')))||c.some(x=>x.startsWith('retencion'))));
   if(!h)return{err:'No encontré el encabezado (Documento, Cuenta y Débito/Crédito o Retención).'};
@@ -2360,8 +2412,8 @@ function ruleOportunidad(ctx){
   if(!ctx.vencePrev)return NA('oportunidad',t,'No hay fecha de vencimiento: carga el calendario tributario del año y revisa el NIT del cliente.');
   const fijada=ctx.client.ctaPago&&ctx.client.ctaPago!=='236575',pago=ctx.client.ctaPago||'236575';
   // la cuenta de pago es la fijada en el perfil o, si no, la que el plan de cuentas llama «por pagar a la DIAN» (en SIIGO, «Impuesto fuente a pagar»)
-  const P=ctx.led.rows.filter(r=>r.deb>0&&r.cta.startsWith('2365')&&(fijada?r.cta.startsWith(pago):conceptoCuenta(ctx.rules,r.cta,r.nom)==='PAGO DIAN'));
-  if(!P.length)return NA('oportunidad',t,'No hay pagos a la DIAN en la cuenta de pago ('+(fijada?pago:'236575 o la que se llame «… a pagar»')+') durante el período.');
+  const D=ctx.led.rows.filter(r=>r.deb>0&&r.cta.startsWith('2365')&&(fijada?r.cta.startsWith(pago):conceptoCuenta(ctx.rules,r.cta,r.nom)==='PAGO DIAN')),cierres=D.filter(r=>/cierre de impuestos|causaci[oó]n/i.test(r.desc||'')),P=D.filter(r=>!cierres.includes(r));   // el cierre de impuestos del mes es un asiento contable, no el pago a la DIAN
+  if(!P.length)return NA('oportunidad',t,cierres.length?'Los débitos de la cuenta de pago ('+cierres.length+') son el cierre de impuestos del mes («'+String(cierres[0].desc).slice(0,40)+'»), un asiento contable y no el pago a la DIAN: no se puede ver la fecha del pago aquí. Revísala en el extracto bancario o en el recibo de pago.':'No hay pagos a la DIAN en la cuenta de pago ('+(fijada?pago:'236575 o la que se llame «… a pagar»')+') durante el período.');
   const rows=P.map(r=>{const f=fechaISO(r.fecha);const d=f?diasEntre(ctx.vencePrev,f):null;
     return{Documento:r.doc,'Fecha del pago':f||'sin fecha','Vencimiento':ctx.vencePrev,Valor:r.deb,Resultado:d==null?'Sin fecha':d>0?d+' día(s) de retraso':d===0?'Último día del plazo':(-d)+' día(s) antes'};});
   const tarde=rows.filter(r=>/retraso/.test(r.Resultado));const cols=['Documento','Fecha del pago','Vencimiento','Valor','Resultado'];
@@ -4211,7 +4263,8 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
   return{err:propio.err.replace(/\.$/,'')+', y la detección automática tampoco lo reconoce. Revisa que sea el reporte correcto o cambia el programa en el perfil del cliente.'};
 }
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
-const autoBases=(rows,fam)=>{if(!parseBalanceNombreCompuesto(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
+const autoBases=(rows,fam)=>{const rs=parseRelacionSiesa(rows);if(!rs.err)return rs;   // relación de retenciones de Siesa: encabezado propio
+  if(!parseBalanceNombreCompuesto(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
   const an=parseAnexoResumen(rows);if(!an.err)return an;   // anexo del cliente (resumen por cuenta): encabezado propio
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
@@ -14559,7 +14612,7 @@ function buildCtx(){
   const c=cur(),d=S.data,g=k=>d[k]&&d[k].parsed;
   const sp=g('dian')?splitDian(g('dian'),S.period,c&&c.nit):null;
   const anexo=g('det')&&g('det').anexoResumen?g('det'):null,detUso=anexo?null:g('det');
-  const nube0=enriquecerNube({led:g('led'),det:detUso,rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud=enriquecerSalud({led:nube0.led,det:nube0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
+  const nube0=enriquecerNube({led:g('led'),det:detUso,rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud0=enriquecerSalud({led:nube0.led,det:nube0.det}),salud=enriquecerSiesa({led:salud0.led,det:salud0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
   const nubeInfo=Object.assign({},nube.info,{totalMov:nube.led&&nube.led.rows?nube.led.rows.length:0,totalBases:nube.det&&nube.det.rows?nube.det.rows.length:0,necesitaNit:!!(g('led')&&g('led').sinNit),necesitaCta:!!(g('det')&&g('det').sinCuenta)});
   const uvtL=uvtLista(),uvtP=uvtEfectiva(uvtL,+String(S.period||'').slice(0,4)||new Date().getFullYear(),c.uvtEspecial);   // UVT del año del período; si el cliente tiene una especial, esa
   return{client:c,period:S.period,meta:pdata().meta,tol:+c.tol||1000,uvt:uvtP.valor,uvtInfo:uvtP,uvtLista:uvtL,rules:c.rules,
@@ -15421,7 +15474,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega64';
+const APP_ENTREGA='fase4b-entrega65';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
