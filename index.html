@@ -4379,7 +4379,7 @@ const autoBases=(rows,fam)=>{const rs=parseRelacionSiesa(rows);if(!rs.err)return
   if(!parseBalanceNombreCompuesto(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
   const an=parseAnexoResumen(rows);if(!an.err)return an;   // anexo del cliente (resumen por cuenta): encabezado propio
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
-  if(x.err&&fam!=='reteica'){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One
+  if(x.err){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One (de retención en la fuente, IVA o ICA: se lee igual en retención en la fuente y en ReteICA)
   if(x.err){const mc=parseModuloCxp(rows);if(!mc.err)x=mc;}   // módulo de cuentas por pagar del software de salud (base real, fecha y factura)
   if(x.err){const ib=parseInformeBasesBloques(rows);if(!ib.err)x=ib;}   // informe de bases por tarifa (no trae el NIT: se completa con el movimiento)
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
@@ -11613,8 +11613,8 @@ function parseInformeComprasRet(rows){
   const out=[],resumen=[],bloques=new Map(),avisos=[];let empresa='',hasta='',granTotal=null,sinCuenta=0,formato='SAP Business One · Informe de compras – retenciones';
   if(hi>=0)for(const r of rows.slice(0,3))for(const v of r||[])if(nz(v)&&!empresa&&!/^informe/i.test(_scT(v))){empresa=_scT(v);}
   let tipoRet='';for(const r of rows.slice(0,12))for(const v of r||[]){const m=/^Tipo Retenci[oó]n:\s*(.+)$/i.exec(_scT(v));if(m&&!tipoRet)tipoRet=m[1].trim();}
-  if(tipoRet&&!/fuente|iva/i.test(tipoRet))return{err:'Este informe de compras con retenciones es de «'+tipoRet+'», no de retención en la fuente ni de IVA.',informe:true};
-  const tipoRetencion=/iva/i.test(tipoRet)&&!/fuente/i.test(tipoRet)?'IVA':'FUENTE';   // el IVA suele venir en un informe aparte (cuentas 2367)
+  if(tipoRet&&!/fuente|iva|\bica\b/i.test(tipoRet))return{err:'Este informe de compras con retenciones es de «'+tipoRet+'», no de retención en la fuente, de IVA ni de ICA.',informe:true};
+  const tipoRetencion=/\bica\b/i.test(tipoRet)&&!/fuente|iva/i.test(tipoRet)?'ICA':/iva/i.test(tipoRet)&&!/fuente/i.test(tipoRet)?'IVA':'FUENTE';   // el IVA y el ICA suelen venir en informes aparte (cuentas 2367 y 2368)
   for(const r of rows.slice(0,10))for(const v of r||[]){const m=/Fecha Final:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(_scT(v));if(m)hasta=m[1];}
   const linea=(o,fuente)=>{const nitRaw=_scT(o.nit);if(!o.fecha||!nitRaw||isNaN(o.base)||isNaN(o.val))return null;
     const nc=/nota\s*cr[eé]dito/i.test(o.tipoDoc);let base=o.base,ret=o.val;if(nc&&base>0&&ret>=0){base=-base;ret=-ret;}   // en el informe las notas crédito ya vienen negativas; si vinieran positivas se restan
@@ -11634,7 +11634,7 @@ function parseInformeComprasRet(rows){
     // resumen del informe (arriba): Código, Nombre del Impuesto, Tarifa, Cuenta Contable, Base Impuesto, Valor Impuesto
     for(let i=0;i<rows.length;i++){const t=(rows[i]||[]).map(x=>_dpn(x));if(t.includes('codigo')&&t.includes('nombre del impuesto')){const c={cod:t.indexOf('codigo'),nom:t.indexOf('nombre del impuesto'),tar:t.findIndex(x=>/^tarifa/.test(x)),cta:t.findIndex(x=>/^cuenta contable/.test(x)),base:t.indexOf('base impuesto'),val:t.indexOf('valor impuesto')};
       for(let j=i+1;j<rows.length;j++){const q=rows[j]||[],a=_scT(q[c.cod]);if(/^tipo retenci/i.test(a)||(q||[]).some(x=>/^gran total/i.test(_scT(x))))break;
-        const ic=q.findIndex(x=>/^236[57]\d{3,}$/.test(_scT(x))),nums=q.filter((x,k)=>typeof x==='number'&&k!==ic);if(a&&ic>=0&&nums.length>=3)resumen.push({cod:a,nom:_scT(q.slice(1).find(x=>typeof x==='string'&&_scT(x)&&!/^236[57]\d{3,}$/.test(_scT(x)))),tar:nums[0],cta:_scT(q[ic]),base:nums[nums.length-2],val:nums[nums.length-1]});}   // Código, nombre, tarifa, cuenta, base, valor: las columnas del encabezado no coinciden con las de los datos (celdas combinadas)
+        const ic=q.findIndex(x=>/^236[578]\d{3,}$/.test(_scT(x))),nums=q.filter((x,k)=>typeof x==='number'&&k!==ic);if(a&&ic>=0&&nums.length>=3)resumen.push({cod:a,nom:_scT(q.slice(1).find(x=>typeof x==='string'&&_scT(x)&&!/^236[578]\d{3,}$/.test(_scT(x)))),tar:nums[0],cta:_scT(q[ic]),base:nums[nums.length-2],val:nums[nums.length-1]});}   // Código, nombre, tarifa, cuenta, base, valor: las columnas del encabezado no coinciden con las de los datos (celdas combinadas)
       break;}}
     // controles internos: el detalle debe coincidir con el resumen, con el total de cada bloque y con el gran total
     const tol=1;
@@ -11643,10 +11643,10 @@ function parseInformeComprasRet(rows){
     for(const b of bloques.values())if(b.cab&&Math.abs(b.base-b.cab.base)>tol&&!avisos.some(x=>x.includes('('+b.cod+')')))avisos.push('El detalle de «'+b.nom+'» ('+b.cod+') no coincide con el total de su bloque (base $'+fm(b.base)+' vs. $'+fm(b.cab.base)+').');
     if(granTotal){const sb=out.reduce((s,x)=>s+x.base,0),sv=out.reduce((s,x)=>s+x.ret,0);if(Math.abs(sb-granTotal.base)>tol||Math.abs(sv-granTotal.val)>tol)avisos.push('El detalle suma base $'+fm(sb)+' y retención $'+fm(sv)+', pero el «Gran Total» del informe dice base $'+fm(granTotal.base)+' y retención $'+fm(granTotal.val)+'.');}
   }else{   // detalle plano de 10 columnas (impuesto, cuenta, tipo, num doc, referencia, fecha, NIT, nombre, base, valor)
-    const cand=rows.filter(r=>r&&/^236[57]\d{2,}$/.test(_scT(r[1]))&&_scFecha(r[5])&&_scT(r[6]));
+    const cand=rows.filter(r=>r&&/^236[578]\d{2,}$/.test(_scT(r[1]))&&_scFecha(r[5])&&_scT(r[6]));
     if(cand.length<3&&!titulo)return{err:'No reconocí el informe de compras con retenciones (SAP Business One): falta el encabezado «Num Doc / Nit / Base Impuesto / Valor Impuesto».'};
     formato='SAP Business One · Informe de compras – retenciones (detalle plano)';
-    for(const r of rows){if(!r||!_scFecha(r[5])||!_scT(r[6]))continue;const cta=/^236[57]\d{2,}$/.test(_scT(r[1]))?_scT(r[1]):'';
+    for(const r of rows){if(!r||!_scFecha(r[5])||!_scT(r[6]))continue;const cta=/^236[578]\d{2,}$/.test(_scT(r[1]))?_scT(r[1]):'';
       if(!cta){sinCuenta++;continue;}
       const l=linea({nom:_scT(r[0]),cta,tipoDoc:r[2],num:r[3],ref:r[4],fecha:_scFecha(r[5]),nit:r[6],terN:r[7],base:_scN(r[8]),val:_scN(r[9]),tar:null,cod:''},'plano');if(l)out.push(l);}
     if(sinCuenta)avisos.push(sinCuenta+(sinCuenta===1?' línea sin cuenta (p. ej. una nota crédito) no se pudo asignar a un impuesto y no se tomó':' líneas sin cuenta (p. ej. notas crédito) no se pudieron asignar a un impuesto y no se tomaron')+': el informe completo sí trae a qué impuesto pertenecen.');}
@@ -11654,13 +11654,13 @@ function parseInformeComprasRet(rows){
   // la tarifa de cada línea contra la del impuesto en el informe
   const fuera=out.filter(l=>l.tarifaInforme>0&&l.base&&Math.abs(l.ret/l.base*100-l.tarifaInforme)>0.05&&Math.abs(l.ret-l.base*l.tarifaInforme/100)>1);
   if(fuera.length)avisos.push(fuera.length+(fuera.length===1?' línea tiene':' líneas tienen')+' una retención que no corresponde a la tarifa del impuesto en el informe (p. ej. documento '+fuera[0].doc+': '+(fuera[0].ret/fuera[0].base*100).toFixed(2)+' % frente a '+fuera[0].tarifaInforme+' %).');
-  return{rows:out,hasBase:out.some(x=>x.base>0),formato:formato+(tipoRetencion==='IVA'?' (IVA)':''),tipoRetencion,resumen,completo:hi>=0,totalInforme:granTotal,empresa,hasta,sinCuenta,avisos};
+  return{rows:out,hasBase:out.some(x=>x.base>0),formato:formato+(tipoRetencion==='IVA'?' (IVA)':tipoRetencion==='ICA'?' (ICA)':''),tipoRetencion,resumen,completo:hi>=0,totalInforme:granTotal,empresa,hasta,sinCuenta,avisos};
 }
 /* El informe de compras con retenciones suele venir en dos archivos (retención en la fuente y, aparte, IVA): se unen como un solo auxiliar con base. */
 function unirInformesCompras(lista){
   const ok=(lista||[]).filter(x=>x&&x.rows);if(ok.length<2)return ok[0]||null;
   const tipos=[...new Set(ok.map(x=>x.tipoRetencion||'FUENTE'))],tg=ok.filter(x=>x.totalInforme),hs=[...new Set(ok.map(x=>x.hasta).filter(Boolean))];
-  return{rows:ok.flatMap(x=>x.rows),hasBase:ok.some(x=>x.hasBase),formato:'SAP Business One · Informe de compras – retenciones ('+ok.length+' archivos unidos: '+tipos.map(t=>t==='IVA'?'IVA':'retención en la fuente').join(' + ')+')',tipoRetencion:tipos.join('+'),tipos,archivos:ok.length,resumen:ok.flatMap(x=>x.resumen||[]),completo:ok.every(x=>x.completo),
+  return{rows:ok.flatMap(x=>x.rows),hasBase:ok.some(x=>x.hasBase),formato:'SAP Business One · Informe de compras – retenciones ('+ok.length+' archivos unidos: '+tipos.map(t=>t==='IVA'?'IVA':t==='ICA'?'ICA':'retención en la fuente').join(' + ')+')',tipoRetencion:tipos.join('+'),tipos,archivos:ok.length,resumen:ok.flatMap(x=>x.resumen||[]),completo:ok.every(x=>x.completo),
     totalInforme:tg.length===ok.length?{base:tg.reduce((t,x)=>t+x.totalInforme.base,0),val:tg.reduce((t,x)=>t+x.totalInforme.val,0)}:null,empresa:ok[0].empresa,hasta:ok.map(x=>x.hasta).filter(Boolean).sort().pop()||'',sinCuenta:ok.reduce((t,x)=>t+(x.sinCuenta||0),0),avisos:[...new Set(ok.flatMap(x=>x.avisos||[]).concat(hs.length>1?['Los informes unidos tienen fechas finales distintas ('+hs.join(' y ')+'): confirma que son del mismo período.']:[]))]};
 }
 
@@ -13225,9 +13225,9 @@ async function loadSlot(k,files,opc){
   const tryEach=(fn,clave)=>{let best=null,bk=null,last=null;for(const s of all){const r=fn(s.rows);if(r.err){last=r;continue;}const kk=(clave?clave(r,s):[]).concat([s.hidden?0:1,r.rows.length]);if(!best||cmpK(kk,bk)>0){best=r;bk=kk;}}return best||last||{err:'El archivo está vacío.'};};
   const infMulti=k==='det'?(()=>{const fam0=S.imp==='reteica'?'reteica':'retefuente',m=porArchivo.map(hojas=>{let b=null;for(const sh of hojas){const x=leerBases(sh.rows,sw,fam0);if(!x.err&&/Informe de compras/.test(x.formato||'')&&x.rows&&x.rows.length&&(!b||(x.completo&&!b.completo)||(!!x.completo===!!b.completo&&x.rows.length>b.rows.length)))b=x;}return b;});
     const prev=(opc&&opc.previoDD&&opc.previoDD.parsed&&opc.previoDD.parsed.partesInf)||[];
-    if(m.length&&m.every(Boolean)&&!(m.length===1&&fam0==='reteica')){const partes=prev.concat(m),x=partes.length>1?unirInformesCompras(partes):Object.assign({},partes[0]);x.partesInf=partes;return x;}
+    if(m.length&&m.every(Boolean)){const partes=prev.concat(m),x=partes.length>1?unirInformesCompras(partes):Object.assign({},partes[0]);x.partesInf=partes;return x;}
     const mv=porArchivo.map(hojas=>{const cands=[];for(const s of hojas){const x=leerMovimiento(s.rows,sw);if(!x.err)cands.push({name:s.name,hidden:!!s.hidden,x,s});}if(!cands.some(s=>s.x.baseGravable))return null;const el=elegirHojaMovimiento(cands,mesesP),b=el.elegida,her=el.todas.slice(1).filter(s=>esHermanable(b.x)&&s.en>0&&b.en>0&&formatoBase(s.x)===formatoBase(b.x)&&firmaEncabezado(s.s.rows)&&firmaEncabezado(s.s.rows)===firmaEncabezado(b.s.rows));return her.length?unirHojasHermanas(b.x,her.map(s=>s.x)):b.x;});   // movimientos con «Base gravable» en varios archivos (retención en la fuente e IVA): se unen
-    if(mv.length&&mv.every(Boolean)&&fam0!=='reteica'){const partes=prev.concat(mv),x=partes.length>1?unirMovimientos(partes):Object.assign({},partes[0]);x.partesInf=partes;return x;}
+    if(mv.length&&mv.every(Boolean)){const partes=prev.concat(mv),x=partes.length>1?unirMovimientos(partes):Object.assign({},partes[0]);x.partesInf=partes;return x;}
     return null;})():null;
   let r;
   if(k==='bal'){const corteP=S.imp==='reteica'?(bimInfo(S.per&&S.per.reteica)||{}).fin:S.imp==='retefuente'?S.period:'';r=tryEach(rows=>leerBalance(rows,sw),x=>[corteP&&x.corte===corteP?1:0]);
@@ -13300,6 +13300,9 @@ async function loadSlot(k,files,opc){
   if(k==='det'&&r.completo!==undefined&&/SAP Business One/.test(r.formato||'')){const ex=[];if(r.empresa)ex.push(r.empresa);
     const mh=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(r.hasta||'');if(mh){const mp=mh[3]+'-'+mh[2].padStart(2,'0');ex.push('corresponde a '+periodoTxt(mp));if(S.imp==='retefuente'&&mp!==S.period){ex.push(mt('LEC-PER-001',{mesArchivo:periodoTxt(mp),mesElegido:periodoTxt(S.period)}));warn2=true;}}
     const nNC=r.rows.filter(x=>x.notaCredito).length;ex.push(new Set(r.rows.map(x=>x.cta)).size+' impuestos · base $'+fm(r.rows.reduce((s,x)=>s+x.base,0))+' · retención $'+fm(r.rows.reduce((s,x)=>s+x.ret,0))+(nNC?' · '+nNC+(nNC===1?' nota crédito':' notas crédito'):''));info2+=' · '+ex.join(' · ');}
+  if(k==='det'&&r.rows&&/Informe de compras/.test(r.formato||'')){const ica=r.rows.some(x=>/^2368/.test(x.cta)),otro=r.rows.some(x=>/^236[57]/.test(x.cta));   // el informe de SAP se lee en los dos flujos; si no trae lo que usa este, se dice
+    if(S.imp==='reteica'&&!ica)r.avisos=(r.avisos||[]).concat('Este informe no trae retención de ICA (cuentas 2368): para ReteICA hace falta el informe de compras de tipo «ICA».');
+    else if(S.imp!=='reteica'&&ica&&!otro)r.avisos=(r.avisos||[]).concat('Este informe es de ICA (cuentas 2368): no trae retención en la fuente ni IVA; sirve para ReteICA.');}
   if((k==='led'||k==='det')&&r.avisos&&r.avisos.length){info2+=' · OJO: '+r.avisos.join(' · ');warn2=true;}
   if(ct&&ct.avisos.length){info2+=' · OJO: '+ct.avisos.join(' · ');warn2=true;}
   DD[k]={names,parsed:k==='form'?r:r,info:info2,warn:warn2,partes:k==='dian'?r.partes:undefined};
@@ -13943,7 +13946,7 @@ async function loadForm131(f){
   D.f131={names:[f.name],parsed:r,info:n+' de 9 renglones leídos '+desde+(r.faltantes.length?' · faltan: '+r.faltantes.join(', '):' · verifica los valores contra el PDF')+(bim?' · bimestre marcado: '+bim+cambio:' · no pude detectar el bimestre marcado'),warn:r.faltantes.length>0||r.dudosas.length>0};
   guardarImagenesForm(D.f131,f,1);
 }
-async function loadSlotR(k,files){if(k==='f131'&&files.length){await loadForm131(files[0]);return;}await loadSlot(k,files);}
+async function loadSlotR(k,files,opc){if(k==='f131'&&files.length){await loadForm131(files[0]);return;}await loadSlot(k,files,opc);}   // opc (p. ej. los archivos ya cargados, al «Agregar otro archivo») también llega a ReteICA
 function prevDeclR(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const b=bimInfo(S.per.reteica),c=cur();const pp=b&&c.periods[periodoKey('reteica',b.prevId)];return pp&&pp.declarado?pp.declarado.total:null;}
 function buildCtxR(){
   const c=cur(),d=S.rica.data,g=k=>d[k]&&d[k].parsed;const id=S.per.reteica,bim=bimInfo(id),cals=allCals();
@@ -14171,7 +14174,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega71';
+const APP_ENTREGA='fase4b-entrega72';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
