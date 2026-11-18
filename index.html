@@ -1664,6 +1664,45 @@ function parseBalanceNombreCompuesto(rows){
   return{rows:out,formato:'balance de prueba con código y nombre en una columna ('+(sinIni?'sin saldo inicial: solo las cuentas con movimiento':'con saldo inicial')+')',sinSaldoInicial:sinIni,total,avisos,
     aviso:sinIni?'no trae el saldo inicial: el «saldo» es solo el movimiento del período (débitos menos créditos), así que no se sabe lo que venía sin pagar del mes anterior ni el saldo final real de cada cuenta; carga el balance con saldo inicial si lo tienes':undefined};
 }
+/* Libro auxiliar de UNA cuenta de retención con una línea por documento: «Código» (cuenta y nombre, en la primera línea de cada cuenta), «Cuenta/Documento», «Fecha», «Tercero» (solo el nombre), «Valor», «%» y «Base»,
+   con «Total <cuenta>» y «Total general». No trae NIT: lo completa el informe de compras del mismo libro (completarNitConCompras). El «%» viene como fracción (0,00866 = 8,66 por mil). */
+function parseAuxiliarCuentaBase(rows){
+  const h=findHeader(rows,c=>c.some(x=>x==='codigo')&&c.some(x=>/^cuenta.?documento/.test(x))&&c.some(x=>x==='fecha')&&c.some(x=>x==='tercero')&&c.some(x=>x==='valor')&&c.some(x=>x==='base'));
+  if(!h)return{err:'No encontré el encabezado del auxiliar con base (Código, Cuenta/Documento, Fecha, Tercero, Valor, %, Base).'};
+  const c=h.cells,ix={cta:c.indexOf('codigo'),doc:c.findIndex(x=>/^cuenta.?documento/.test(x)),fec:c.indexOf('fecha'),ter:c.indexOf('tercero'),val:c.indexOf('valor'),base:c.indexOf('base')};
+  ix.pct=c.findIndex(x=>x==='%'||x==='porcentaje');if(ix.pct<0&&ix.base===ix.val+2)ix.pct=ix.val+1;
+  const tx=v=>String(v==null?'':v).trim(),out=[],avisos=[];let cta='',nom='',tot=null;
+  for(let i=h.i+1;i<rows.length;i++){const r=rows[i]||[],a=tx(r[ix.cta]);
+    if(/^total general/i.test(a)){const v=num(r[ix.val]),b=num(r[ix.base]);if(v!=null&&b!=null)tot={val:v,base:b};continue;}
+    if(/^total\b/i.test(a))continue;
+    const m=/^(\d{4,})\s+(.*)$/.exec(a);if(m){cta=m[1];nom=m[2].trim();}
+    const doc=tx(r[ix.doc]),f=r[ix.fec];if(!doc||!cta||f===''||f==null)continue;
+    const val=num(r[ix.val]),base=num(r[ix.base]);if(val==null||base==null)continue;
+    const p=ix.pct>=0?num(r[ix.pct]):null;
+    out.push({fecha:typeof f==='number'?serialAFecha(f):tx(f),doc,cta,nom,ter:'',terRaw:'',terN:tx(r[ix.ter]).replace(/\s+/g,' '),desc:'',cc:'',deb:0,cre:0,base,ret:val,tarifa:p>0?(p<0.05?p*1000:p*10):null});}
+  if(!out.length)return{err:'No encontré líneas en el auxiliar con base.'};
+  if(tot){const sb=out.reduce((s,x)=>s+x.base,0),sv=out.reduce((s,x)=>s+x.ret,0);if(Math.abs(sb-tot.base)>1||Math.abs(sv-tot.val)>1)avisos.push('El detalle suma base $'+fm(sb)+' y retención $'+fm(sv)+', pero el «Total general» del auxiliar dice base $'+fm(tot.base)+' y retención $'+fm(tot.val)+'.');}
+  let entidad='',corte='',corteTxt='';const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  for(const r of rows.slice(0,h.i)){for(const v of r||[]){const s=tx(v);if(!s)continue;const m=/entre el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+y el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(s);if(m){corte=m[6]+'-'+m[5].padStart(2,'0');corteTxt=MES[+m[5]-1]+' de '+m[6];}else if(!entidad&&/[A-Za-zÁÉÍÓÚÑ]{4}/.test(s)&&!/^(libro|elaborado)/i.test(s))entidad=s;}}
+  return{rows:out,hasBase:true,formato:'libro auxiliar de la cuenta con base (sin NIT del tercero: se completa con el informe de compras del mismo libro)',sinNitCompras:true,totalInforme:tot,entidad,corte,corteTxt,avisos};
+}
+/* «Compras por Documento»: CC/Nit, Proveedor, Fecha, Documento, Compra Bruta, Descuento, Compra Neta, IVA y Valor Total (con «TOTAL GENERAL» al final). Sirve para completar el NIT de un auxiliar que solo trae el nombre. */
+function parseComprasPorDocumento(rows){
+  const h=findHeader(rows,c=>c.some(x=>x==='cc nit')&&c.some(x=>x==='proveedor')&&c.some(x=>x==='documento')&&c.some(x=>x==='compra neta'));
+  if(!h)return{err:'No encontré el encabezado del informe de compras por documento (CC/Nit, Proveedor, Fecha, Documento, Compra Neta).'};
+  const c=h.cells,ix={nit:c.indexOf('cc nit'),nom:c.indexOf('proveedor'),fec:c.indexOf('fecha'),doc:c.indexOf('documento'),neta:c.indexOf('compra neta'),iva:c.findIndex(x=>x==='iva')},out=[];
+  for(let i=h.i+1;i<rows.length;i++){const r=rows[i]||[],nit=String(r[ix.nit]==null?'':r[ix.nit]).replace(/\D/g,'');if(nit.length<5)continue;const neta=num(r[ix.neta]);if(neta==null)continue;
+    const f=r[ix.fec];out.push({nit,nom:String(r[ix.nom]||'').replace(/\s+/g,' ').trim(),fecha:typeof f==='number'?serialAFecha(f):String(f==null?'':f).trim(),doc:String(r[ix.doc]||'').replace(/\s+/g,' ').trim(),neta,iva:ix.iva>=0?(num(r[ix.iva])||0):0});}
+  return out.length?{rows:out}:{err:'No encontré líneas en el informe de compras por documento.'};
+}
+/* Completa el NIT de las líneas de un auxiliar que solo trae el nombre: la compra con la misma fecha y la misma base (compra neta); si hay varias, la que tiene los mismos números de documento. Devuelve {rows, unidos, sin}. */
+function completarNitConCompras(rows,compras){
+  const dig=s=>(String(s||'').match(/\d+/g)||[]).join('-'),fi=f=>fechaISO(f)||String(f||'');let unidos=0,sin=0;
+  const out=rows.map(r=>{if(r.ter)return r;let c=compras.filter(x=>fi(x.fecha)===fi(r.fecha)&&Math.abs(x.neta-r.base)<=1);
+    if(c.length>1){const d=dig(r.doc),c2=c.filter(x=>dig(x.doc)===d);if(c2.length)c=c2;}
+    const nits=[...new Set(c.map(x=>x.nit))];if(nits.length===1){unidos++;return Object.assign({},r,{ter:nitBase(nits[0])||nits[0],terRaw:nits[0]});}sin++;return r;});
+  return{rows:out,unidos,sin};
+}
 /* Balance general en formato PUC jerárquico (cuentas de 1, 2, 4, 6, 8 y 10 dígitos) que trae solo el SALDO A DOS FECHAS (columnas «Saldo a 2026/09» y «Saldo a 2026/10»), sin débitos ni créditos:
    el movimiento neto del mes es la diferencia entre los dos saldos. Los pasivos y el patrimonio vienen en negativo (como en el resto de los balances con signo); si vinieran en positivo no se adivina: se dice. */
 function parseBalanceSaldosFechas(rows){
@@ -1726,6 +1765,11 @@ function parseBalanceEstandar(rows){
     out.push({cta:code,nom:String(r[ix.nom]||'').trim(),sa,deb,cre,sf});
   }
   if(!out.length)return{err:'El balance no tiene filas con código de cuenta numérico.'};
+  /* Saldos por naturaleza (pasivo, patrimonio e ingresos en positivo): se reconocen por la aritmética de las cuentas de pasivo, patrimonio e ingresos con movimiento (saldo anterior + créditos − débitos = saldo final, y no al revés)
+     y se pasan al signo contable (crédito en negativo), como hace parseBalanceReporte; si la aritmética con signo cuadra, no se toca nada. */
+  const cr=out.filter(x=>/^[234]/.test(x.cta)&&(x.deb||x.cre));
+  if(cr.length>=5){const fN=cr.filter(x=>Math.abs(x.sa-x.deb+x.cre-x.sf)<=1.5).length/cr.length,fS=cr.filter(x=>Math.abs(x.sa+x.deb-x.cre-x.sf)<=1.5).length/cr.length;
+    if(fN>=0.9&&fS<=0.3)return{rows:out.map(x=>'15678'.includes(x.cta[0])?x:Object.assign({},x,{sa:0-x.sa,sf:0-x.sf})),formato:'balance con saldos por naturaleza (pasivo, patrimonio e ingresos en positivo), pasados al signo contable',naturaleza:true};}
   return{rows:out};
 }
 
@@ -3497,7 +3541,8 @@ function ricaLineas(ctx){
   if(ctx.det&&ctx.det.rows&&ctx.det.sinCuenta&&/reteica/i.test(ctx.det.formato||'')){   // informe de impuestos detallados de SIIGO Nube: no trae cuentas; cada bloque «ReteICA n» es una tarifa por mil
     return ctx.det.rows.filter(r=>!r.pago).map(r=>({cta:'2368',nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:r.ret,tarifa:r.tarifa!=null?r.tarifa:tarifaMil(r.nom),estimada:false,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)}));}
   if(ctx.det&&ctx.det.rows){
-    return ctx.det.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.ret!=null?r.ret:(r.cre-r.deb);
+    return ctx.det.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=r.tarifa!=null?r.tarifa:tarifaMil(r.nom);const a=r.ret!=null?r.ret:(r.cre-r.deb);   // la tarifa que trae el propio auxiliar (en por mil) manda sobre la del nombre de la cuenta
+      
       return{cta:r.cta,nom:r.nom,doc:r.doc,ter:r.ter,terRaw:r.terRaw,terN:r.terN,base:r.base,ret:a,tarifa:t,estimada:false,fecha:r.fecha,fechaIso:fechaDeLinea(r,FD)};});}
   if(ctx.led&&ctx.led.rows){
     return ctx.led.rows.filter(r=>r.cta.startsWith('2368')&&!r.cta.startsWith(pago)).map(r=>{const t=tarifaMil(r.nom);const a=r.cre-r.deb;
@@ -3542,7 +3587,7 @@ function ruleRicaPago(ctx){
   const dif=lb.pagoDeb-lb.saldoAnt;const cols=['Concepto','Valor'];
   if(ctx.prevDecl!=null){const d2=lb.pagoDeb-ctx.prevDecl;rows.push({Concepto:'Total declarado el bimestre anterior',Valor:ctx.prevDecl},{Concepto:'Pago menos declarado',Valor:d2});
     if(Math.abs(d2)>ctx.tol)return R('pago',t,'warn','El pago difiere en $'+fm(d2)+' de lo declarado el bimestre anterior. Verifica el recibo de pago.',cols,rows);}
-  if(Math.abs(dif)>ctx.tol)return R('pago',t,'err','El saldo anterior de 2368 ($'+fm(lb.saldoAnt)+') no coincide con el pago del bimestre anterior ($'+fm(lb.pagoDeb)+'): diferencia de $'+fm(Math.abs(dif))+'. Hay saldos o asientos de períodos anteriores sin conciliar; mira «Saldos de las cuentas de retención».',cols,rows);
+  if(Math.abs(dif)>ctx.tol)return R('pago',t,'err','El saldo anterior de 2368 ($'+fm(lb.saldoAnt)+') no coincide con el pago del bimestre anterior ($'+fm(lb.pagoDeb)+'): diferencia de $'+fm(Math.abs(dif))+'. Hay saldos o asientos de períodos anteriores sin conciliar; mira «Saldos de las cuentas de retención».'+(lb.pg?'':' No encontré la cuenta de pago de ReteICA ('+(ctx.client.ctaPagoRica||'236899')+'): si el cliente paga desde otra cuenta de la 2368, ajústala en el perfil del cliente.'),cols,rows);
   return R('pago',t,'ok','El pago a la Secretaría de Hacienda ($'+fm(lb.pagoDeb)+') cubre el saldo anterior de la cuenta 2368.',cols,rows);
 }
 function ruleRicaOportunidad(ctx){
@@ -3596,14 +3641,15 @@ function ruleRicaDetalle(ctx){
   const t='Detalle de la retención por tarifa de ICA';
   const L=ricaLineas(ctx);if(!L)return NA('detalle',t,'Falta el auxiliar de retención de ICA o el movimiento contable.');
   const lb=ctx.bal?ricaLibros(ctx):null;const g={};
-  for(const x of L){const o=g[x.cta+'|'+x.nom]=g[x.cta+'|'+x.nom]||{cta:x.cta,nom:x.nom,tarifa:x.tarifa,base:0,ret:0,n:0};o.base+=x.base||0;o.ret+=x.ret;o.n++;}
+  for(const x of L){const o=g[x.cta+'|'+x.nom]=g[x.cta+'|'+x.nom]||{cta:x.cta,nom:x.nom,tarifa:x.tarifa,base:0,ret:0,n:0,tarifas:new Set(),prueba:0,pruebaOk:true};o.base+=x.base||0;o.ret+=x.ret;o.n++;if(x.tarifa!=null){o.tarifas.add(x.tarifa);o.prueba+=(x.base||0)*x.tarifa/1000;}else o.pruebaOk=false;}
   const rows=[];let errB=0,warnT=0,tb=0,tr=0;
   for(const o of Object.values(g).sort((a,b)=>a.cta<b.cta?-1:1)){
-    const prueba=o.tarifa!=null?o.base*o.tarifa/1000:null;const a=lb&&lb.ret.find(z=>z.cta===o.cta);const bal=a?-a.sf:null;
+    const varias=o.tarifas.size>1&&o.pruebaOk;   // una misma cuenta con varias tarifas (el auxiliar las trae por línea): cada línea se prueba con la suya
+    const prueba=varias?o.prueba:(o.tarifa!=null?o.base*o.tarifa/1000:null);const a=lb&&lb.ret.find(z=>z.cta===o.cta);const bal=a?-a.sf:null;
     const dB=bal!=null?o.ret-bal:null;const dP=prueba!=null?prueba-o.ret:null;
     if(dB!=null&&Math.abs(dB)>ctx.tol)errB++;if(dP!=null&&Math.abs(dP)>Math.max(ctx.tol,Math.abs(o.ret)*0.005))warnT++;
     tb+=o.base;tr+=o.ret;
-    rows.push({Cuenta:o.cta+' '+o.nom,'Tarifa ‰':o.tarifa,Líneas:o.n,Base:Math.round(o.base),Retención:o.ret,'Base × tarifa':prueba==null?'':Math.round(prueba),'Dif. tarifa':dP==null?'':Math.round(dP),'Saldo final en balance':bal==null?'':bal,'Dif. balance':dB==null?'':dB});}
+    rows.push({Cuenta:o.cta+' '+o.nom,'Tarifa ‰':varias?[...o.tarifas].sort((p,q)=>p-q).join(' y '):o.tarifa,Líneas:o.n,Base:Math.round(o.base),Retención:o.ret,'Base × tarifa':prueba==null?'':Math.round(prueba),'Dif. tarifa':dP==null?'':Math.round(dP),'Saldo final en balance':bal==null?'':bal,'Dif. balance':dB==null?'':dB});}
   rows.push({Cuenta:'TOTAL','Tarifa ‰':'',Líneas:L.length,Base:Math.round(tb),Retención:tr,'Base × tarifa':'','Dif. tarifa':'','Saldo final en balance':lb?lb.neto:'','Dif. balance':lb?tr-lb.neto:''});
   const cols=['Cuenta','Tarifa ‰','Líneas','Base','Retención','Base × tarifa','Dif. tarifa','Saldo final en balance','Dif. balance'];
   const est=L.some(x=>x.estimada);const nota=est?' La base es estimada (retención ÷ tarifa) porque no se cargó el auxiliar con base.':'';
@@ -4330,7 +4376,7 @@ function validarContrato(tipo,r){
     const txt=mal+' de '+n+' filas no traen '+(campo==='fecha'||campo==='base'?'una ':'un ')+CONTRATO_ROTULO[campo]+' válid'+(campo==='fecha'||campo==='base'?'a':'o')+(ej!=null?' (por ejemplo «'+String(ej).slice(0,30)+'»)':'');
     (mal/n>CONTRATO_UMBRAL_ERROR?errores:avisos).push(txt);
   }
-  if(tipo==='led'&&!r.sinNit&&!r.sinNitDet){   // defensa general: hay nombre de tercero pero casi ninguna identificación → probables columnas desplazadas (se pierde el tercero)
+  if(tipo==='led'&&!r.sinNit&&!r.sinNitDet&&!r.sinNitCompras){   // (el auxiliar sin NIT que se completa con el informe de compras ya lo avisa aparte)  defensa general: hay nombre de tercero pero casi ninguna identificación → probables columnas desplazadas (se pierde el tercero)
     const conNombre=r.rows.filter(f=>f.terN!=null&&String(f.terN).trim()!=='').length,sinId=r.rows.filter(f=>f.terN!=null&&String(f.terN).trim()!==''&&!String(f.ter==null?'':f.ter).trim()).length;
     if(conNombre>=5&&sinId/conNombre>0.5)avisos.push('en '+sinId+' de '+conNombre+' filas con nombre de tercero falta su identificación: puede que las columnas del archivo estén desplazadas y se esté perdiendo el tercero');
   }
@@ -4414,6 +4460,7 @@ const autoBases=(rows,fam)=>{const rs=parseRelacionSiesa(rows);if(!rs.err)return
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One (de retención en la fuente, IVA o ICA: se lee igual en retención en la fuente y en ReteICA)
   if(x.err){const mc=parseModuloCxp(rows);if(!mc.err)x=mc;}   // módulo de cuentas por pagar del software de salud (base real, fecha y factura)
+  if(x.err){const ac=parseAuxiliarCuentaBase(rows);if(!ac.err)x=ac;}   // auxiliar de una cuenta de retención con tercero (solo nombre), valor, porcentaje y base
   if(x.err){const ib=parseInformeBasesBloques(rows);if(!ib.err)x=ib;}   // informe de bases por tarifa (no trae el NIT: se completa con el movimiento)
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
@@ -13333,9 +13380,13 @@ async function loadSlot(k,files,opc){
   if(k==='det'&&r.completo!==undefined&&/SAP Business One/.test(r.formato||'')){const ex=[];if(r.empresa)ex.push(r.empresa);
     const mh=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(r.hasta||'');if(mh){const mp=mh[3]+'-'+mh[2].padStart(2,'0');ex.push('corresponde a '+periodoTxt(mp));if(S.imp==='retefuente'&&mp!==S.period){ex.push(mt('LEC-PER-001',{mesArchivo:periodoTxt(mp),mesElegido:periodoTxt(S.period)}));warn2=true;}}
     const nNC=r.rows.filter(x=>x.notaCredito).length;ex.push(new Set(r.rows.map(x=>x.cta)).size+' impuestos · base $'+fm(r.rows.reduce((s,x)=>s+x.base,0))+' · retención $'+fm(r.rows.reduce((s,x)=>s+x.ret,0))+(nNC?' · '+nNC+(nNC===1?' nota crédito':' notas crédito'):''));info2+=' · '+ex.join(' · ');}
-  if(k==='det'&&r.rows&&/Informe de compras/.test(r.formato||'')){const ica=r.rows.some(x=>/^2368/.test(x.cta)),otro=r.rows.some(x=>/^236[57]/.test(x.cta));   // el informe de SAP se lee en los dos flujos; si no trae lo que usa este, se dice
+  if(k==='det'&&r.rows&&r.sinNitCompras){let cp=null;for(const hojas of porArchivo){for(const sh of hojas){const x=parseComprasPorDocumento(sh.rows);if(!x.err&&x.rows.length){cp=x;break;}}if(cp)break;}   // el auxiliar trae solo el nombre del tercero: el NIT sale del informe de compras del mismo libro
+    if(cp){const c=completarNitConCompras(r.rows,cp.rows);r.rows=c.rows;r.nitDeCompras=c.unidos;r.sinNitCompras=c.sin>0;if(c.sin)r.avisos=(r.avisos||[]).concat(c.sin+(c.sin===1?' línea quedó':' líneas quedaron')+' sin NIT (su fecha y su base no coinciden con ninguna compra del informe): se tratarán por el nombre del tercero.');}
+    else r.avisos=(r.avisos||[]).concat('Este auxiliar no trae el NIT del tercero y el libro no tiene la hoja «Informe Compras» para completarlo: carga también el informe de compras o el movimiento.');}
+  if(k==='det'&&r.rows&&/Informe de compras|libro auxiliar de la cuenta/.test(r.formato||'')){const ica=r.rows.some(x=>/^2368/.test(x.cta)),otro=r.rows.some(x=>/^236[57]/.test(x.cta));   // el informe de SAP se lee en los dos flujos; si no trae lo que usa este, se dice
     if(S.imp==='reteica'&&!ica)r.avisos=(r.avisos||[]).concat('Este informe no trae retención de ICA (cuentas 2368): para ReteICA hace falta el informe de compras de tipo «ICA».');
     else if(S.imp!=='reteica'&&ica&&!otro)r.avisos=(r.avisos||[]).concat('Este informe es de ICA (cuentas 2368): no trae retención en la fuente ni IVA; sirve para ReteICA.');}
+  if(k==='det'&&r.nitDeCompras)info2+=' · NIT de '+r.nitDeCompras+(r.nitDeCompras===1?' línea tomado':' líneas tomado')+' del informe de compras del mismo libro';
   if((k==='led'||k==='det')&&r.avisos&&r.avisos.length){info2+=' · OJO: '+r.avisos.join(' · ');warn2=true;}
   if(ct&&ct.avisos.length){info2+=' · OJO: '+ct.avisos.join(' · ');warn2=true;}
   DD[k]={names,parsed:k==='form'?r:r,info:info2,warn:warn2,partes:k==='dian'?r.partes:undefined};
@@ -14207,7 +14258,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega73';
+const APP_ENTREGA='fase4b-entrega74';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
