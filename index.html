@@ -1664,11 +1664,35 @@ function parseBalanceNombreCompuesto(rows){
   return{rows:out,formato:'balance de prueba con código y nombre en una columna ('+(sinIni?'sin saldo inicial: solo las cuentas con movimiento':'con saldo inicial')+')',sinSaldoInicial:sinIni,total,avisos,
     aviso:sinIni?'no trae el saldo inicial: el «saldo» es solo el movimiento del período (débitos menos créditos), así que no se sabe lo que venía sin pagar del mes anterior ni el saldo final real de cada cuenta; carga el balance con saldo inicial si lo tienes':undefined};
 }
+/* Balance general en formato PUC jerárquico (cuentas de 1, 2, 4, 6, 8 y 10 dígitos) que trae solo el SALDO A DOS FECHAS (columnas «Saldo a 2026/09» y «Saldo a 2026/10»), sin débitos ni créditos:
+   el movimiento neto del mes es la diferencia entre los dos saldos. Los pasivos y el patrimonio vienen en negativo (como en el resto de los balances con signo); si vinieran en positivo no se adivina: se dice. */
+function parseBalanceSaldosFechas(rows){
+  const esFecha=x=>/^\d{4}[\/ ]\d{1,2}$/.test(x),kf=x=>{const m=/^(\d{4})[\/ ](\d{1,2})$/.exec(x);return m[1]+'-'+m[2].padStart(2,'0');};   // el encabezado normalizado cambia «2026/09» por «2026 09»
+  const h=findHeader(rows,c=>c.some(x=>x.startsWith('cuenta'))&&c.filter(esFecha).length>=2);
+  if(!h)return{err:'No encontré el encabezado del balance con saldos a dos fechas (Cuentas y dos columnas «aaaa/mm»).'};
+  const c=h.cells,iC=c.findIndex(x=>x.startsWith('cuenta')),iN=c.findIndex(x=>x.startsWith('descripcion')||x.startsWith('nombre'));
+  const fs=c.map((x,i)=>esFecha(x)?{i,k:kf(x)}:null).filter(Boolean).sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:0),[ant,fin]=[fs[0],fs[fs.length-1]];
+  if(ant.k===fin.k)return{err:'El balance con saldos a dos fechas trae las dos columnas con la misma fecha.'};
+  const out=[],vistos=new Set();
+  for(let i=h.i+1;i<rows.length;i++){const r=rows[i]||[],code=String(r[iC]==null?'':r[iC]).trim();if(!/^\d+$/.test(code)||vistos.has(code))continue;
+    const a=num(r[ant.i]),b=num(r[fin.i]);if(a==null&&b==null)continue;vistos.add(code);
+    const sa=a||0,sf=b||0,mov=sf-sa;out.push({cta:code,nom:iN>=0?String(r[iN]==null?'':r[iN]).replace(/\s+/g,' ').trim():'',sa,deb:mov>0?mov:0,cre:mov<0?-mov:0,sf});}
+  if(out.length<5)return{err:'El balance con saldos a dos fechas no tiene filas con código de cuenta numérico.'};
+  const hojas=out.filter(x=>!out.some(o=>o.cta.length>x.cta.length&&o.cta.startsWith(x.cta))),pas=hojas.filter(x=>x.cta[0]==='2'&&x.sf!==0),sumPas=pas.reduce((s,x)=>s+x.sf,0);   // la convención la da la SUMA de los pasivos (hay pasivos con saldo deudor legítimos: IVA descontable, anticipos)
+  if(pas.length>=3&&sumPas>0)return{err:'Este balance trae los pasivos en positivo: el lector espera los saldos con signo (pasivos y patrimonio en negativo, como en un balance de prueba), para calcular el movimiento del mes.'};
+  const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],[ay,am]=fin.k.split('-'),bm=ant.k.split('-')[1];
+  let entidad='',nit='';for(const r of rows.slice(0,Math.max(0,h.i))){for(const v of r||[]){const s=String(v==null?'':v).trim();if(!s)continue;if(!nit&&/^\d{6,10}\s*-\s*\d$/.test(s))nit=s.split('-')[0].trim();else if(!entidad&&/[A-Za-zÁÉÍÓÚÑ]{4}/.test(s)&&!/^(balance|anexo|libro|cifras)/i.test(s)&&!/^\d/.test(s))entidad=s;}}
+  const r={rows:out,formato:'balance general con el saldo a dos fechas ('+MES[+bm-1]+' y '+MES[+am-1]+' de '+ay+')',netoMes:true,cuadre:1,corte:fin.k,corteTxt:MES[+am-1]+' de '+ay,saldoAnterior:ant.k,entidad,nit};
+  const sum=hojas.reduce((s,x)=>s+x.sf,0),sumA=hojas.reduce((s,x)=>s+x.sa,0),mal=[];if(Math.abs(sumA)>5)mal.push(ant.k.split('-').reverse().join('/')+': $'+fm(sumA));if(Math.abs(sum)>5)mal.push(fin.k.split('-').reverse().join('/')+': $'+fm(sum));
+  if(mal.length)r.aviso='las cuentas hoja no suman cero ('+mal.join(' · ')+'): el balance no cuadra o falta alguna cuenta';
+  return r;
+}
 function parseBalance(rows){
   if(!parseMovimientoPlano(rows).err)return{err:'Es un movimiento contable, no un balance de prueba.'};const bc=parseBalanceComprobacion(rows);if(!bc.err)return bc;
   const sa=parseBalanceSalud(rows);if(!sa.err)return sa;   // libro mayor general del software de salud (encabezado propio)
   const nc=parseBalanceNombreCompuesto(rows);if(!nc.err)return nc;   // código y nombre juntos en una columna «Nombre» (encabezado propio)
   const sg=parseBalanceSiigo(rows);if(!sg.err)return sg;   // SIIGO primero: el lector estándar leería mal su código de cuenta
+  const sf2=parseBalanceSaldosFechas(rows);if(!sf2.err)return sf2;   // balance general con el saldo a dos fechas (sin débitos ni créditos)
   const std=parseBalanceEstandar(rows);if(!std.err)return std;
   const alt=parseBalanceReporte(rows);if(!alt.err)return alt;
   const men=parseBalanceMensual(rows);return men.err?std:men;
@@ -3501,10 +3525,19 @@ function ruleRicaFormulario(ctx){
   const cols=['Verificación','En el borrador','Esperado','Estado','Nota'];
   return err?R('formulario',t,'err',err+' control(es) del formulario no cuadran.',cols,rows):R('formulario',t,'ok','Identificación, período y sumas internas del formulario 131 son coherentes.',cols,rows);
 }
+/* Un balance con solo el saldo a dos fechas trae como «saldo anterior» el del primer mes que trae. Para un bimestre hace falta el del cierre del bimestre anterior: si no coincide, el saldo anterior y los débitos del balance
+   no sirven para revisar el pago ni los arrastres. Devuelve el motivo (texto) o vacío si el balance sirve. */
+function balanceSinInicioBimestre(ctx){
+  const m=ctx&&ctx.balMeta,b=ctx&&ctx.bim;if(!m||!m.netoMes||!m.saldoAnterior||!b)return '';
+  const esperado=(b.mesIni===1?(b.anio-1)+'-12':b.anio+'-'+String(b.mesIni-1).padStart(2,'0'));if(m.saldoAnterior===esperado)return '';   // el mes anterior al primero del bimestre
+  const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],tx=p=>MES[+p.slice(5,7)-1]+' de '+p.slice(0,4);
+  return 'El balance trae el saldo a '+tx(m.saldoAnterior)+', no el del cierre del bimestre anterior ('+tx(esperado)+'), y solo el movimiento neto del mes.';
+}
 function ruleRicaPago(ctx){
   const t='Pago de la retención de ICA del bimestre anterior';
   if(!ctx.bal)return NA('pago',t,'Falta cargar el balance.');
   const lb=ricaLibros(ctx);if(!lb.L.length)return NA('pago',t,'El balance no trae cuentas 2368.');
+  const sb=balanceSinInicioBimestre(ctx);if(sb)return NA('pago',t,sb+' Para revisar el pago carga el balance con el saldo al cierre del bimestre anterior (o el movimiento con los débitos de la cuenta de pago).');
   const rows=[{Concepto:'Saldo anterior de la cuenta 2368 (por pagar)',Valor:lb.saldoAnt},{Concepto:'Pago a la Secretaría de Hacienda en el bimestre (débitos de la cuenta 236899)',Valor:lb.pagoDeb},{Concepto:'Diferencia',Valor:lb.pagoDeb-lb.saldoAnt}];
   const dif=lb.pagoDeb-lb.saldoAnt;const cols=['Concepto','Valor'];
   if(ctx.prevDecl!=null){const d2=lb.pagoDeb-ctx.prevDecl;rows.push({Concepto:'Total declarado el bimestre anterior',Valor:ctx.prevDecl},{Concepto:'Pago menos declarado',Valor:d2});
@@ -3551,13 +3584,13 @@ function ruleRicaSaldos(ctx){
   const t='Saldos de las cuentas de retención (2368)';
   if(!ctx.bal)return NA('saldos',t,'Falta cargar el balance.');
   const lb=ricaLibros(ctx);if(!lb.L.length)return NA('saldos',t,'El balance no trae cuentas 2368.');
-  const rows=[];let malos=0;
-  for(const a of lb.ret){const contrario=a.sf>ctx.tol/10;const arrastre=Math.abs(a.sa)>ctx.tol/10;if(contrario)malos++;
+  const rows=[];let malos=0;const sb=balanceSinInicioBimestre(ctx);   // sin el saldo al cierre del bimestre anterior no se puede decir qué arrastra
+  for(const a of lb.ret){const contrario=a.sf>ctx.tol/10;const arrastre=!sb&&Math.abs(a.sa)>ctx.tol/10;if(contrario)malos++;
     if(contrario||arrastre)rows.push({Cuenta:a.cta+' '+a.nom,'Saldo anterior':-a.sa,Débitos:a.deb,Créditos:a.cre,'Saldo final':-a.sf,Hallazgo:contrario?'Saldo débito en una cuenta de retención por pagar':'Arrastra saldo de períodos anteriores'});}
   const cols=['Cuenta','Saldo anterior','Débitos','Créditos','Saldo final','Hallazgo'];
   if(malos)return R('saldos',t,'err',malos+' cuenta(s) de retención con saldo débito al cierre (los saldos se muestran con el crédito en positivo y el débito en negativo). Suele indicar retenciones reversadas o pagadas de más en períodos anteriores.',cols,rows);
   if(rows.length)return R('saldos',t,'warn',rows.length+' cuenta(s) arrastran saldo de períodos anteriores.',cols,rows);
-  return R('saldos',t,'ok','Ninguna cuenta de retención de ICA queda con saldo contrario ni arrastra saldos anteriores.');
+  return R('saldos',t,'ok',sb?'Ninguna cuenta de retención de ICA queda con saldo contrario al cierre. No se revisó si arrastran saldos anteriores: '+sb:'Ninguna cuenta de retención de ICA queda con saldo contrario ni arrastra saldos anteriores.');
 }
 function ruleRicaDetalle(ctx){
   const t='Detalle de la retención por tarifa de ICA';
@@ -4376,7 +4409,7 @@ function conRespaldo(a,cap,tipoTxt,rows,auto){
 }
 /* Puntos de entrada: sin programa elegido («Detectar automáticamente») hacen exactamente lo de siempre. */
 const autoBases=(rows,fam)=>{const rs=parseRelacionSiesa(rows);if(!rs.err)return rs;const rg=parseReporteBasesGravadas(rows);if(!rg.err)return rg;   // relación de retenciones de Siesa: encabezado propio
-  if(!parseBalanceNombreCompuesto(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
+  if(!parseBalanceNombreCompuesto(rows).err||!parseBalanceSaldosFechas(rows).err)return{err:'Este archivo es un balance de prueba, no un auxiliar de retenciones con base.'};   // sin esto el lector de respaldo lo leía como «2 filas con base»
   const an=parseAnexoResumen(rows);if(!an.err)return an;   // anexo del cliente (resumen por cuenta): encabezado propio
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One (de retención en la fuente, IVA o ICA: se lee igual en retención en la fuente y en ReteICA)
@@ -13950,7 +13983,7 @@ async function loadSlotR(k,files,opc){if(k==='f131'&&files.length){await loadFor
 function prevDeclR(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const b=bimInfo(S.per.reteica),c=cur();const pp=b&&c.periods[periodoKey('reteica',b.prevId)];return pp&&pp.declarado?pp.declarado.total:null;}
 function buildCtxR(){
   const c=cur(),d=S.rica.data,g=k=>d[k]&&d[k].parsed;const id=S.per.reteica,bim=bimInfo(id),cals=allCals();
-  return{client:c,period:bim.fin,bim,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:filtrarMovimientoPorMeses(g('led'),[prevP(bim.fin),bim.fin]),det:g('det'),form:hasF131()?S.rica.form:null,
+  return{client:c,period:bim.fin,bim,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,balMeta:g('bal')?{saldoAnterior:g('bal').saldoAnterior||'',netoMes:!!g('bal').netoMes,corte:g('bal').corte||''}:null,led:filtrarMovimientoPorMeses(g('led'),[prevP(bim.fin),bim.fin]),det:g('det'),form:hasF131()?S.rica.form:null,
     venceActual:fechaObligacion(c,cals,'reteica',id),vencePrev:fechaObligacion(c,cals,'reteica',bim.prevId),prevDecl:prevDeclR()};
 }
 function runValidationR(){
@@ -14174,7 +14207,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega72';
+const APP_ENTREGA='fase4b-entrega73';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
