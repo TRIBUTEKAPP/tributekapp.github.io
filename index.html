@@ -3299,6 +3299,13 @@ function ruleBaseDian(ctx){
     const s=bookedVal[r.ter]=bookedVal[r.ter]||new Set();if(r.deb)s.add(Math.round(r.deb));if(r.cre)s.add(Math.round(r.cre));}}
   const hasVal=(ter,v)=>{const s=bookedVal[ter];if(!s)return false;const x=Math.round(Math.abs(v));for(let d=-2;d<=2;d++)if(s.has(x+d))return true;return false;};
   const contabilizado=it=>it.ds?bookedKey.has(keyDoc(it.id)):!!((bookedNum[it.ter]&&bookedNum[it.ter].has(numDoc(it.r.folio)))||hasVal(it.ter,it.r.total)||hasVal(it.ter,it.base));
+  /* El concepto con que se contabilizó la factura (la cuenta de gasto de su documento: por el número de la factura o, si no, por el valor): compras 10 UVT, servicios 2 UVT, arrendamiento 10 UVT, honorarios sin base mínima */
+  const ledPorTer={};if(ctx.led)for(const r of ctx.led.rows)if(r.ter)(ledPorTer[r.ter]=ledPorTer[r.ter]||[]).push(r);
+  const conceptoDe=it=>{const rs=ledPorTer[it.ter]||[];if(!rs.length)return null;const nf=numDoc(it.r.folio),tot=Math.round(it.r.total||0),bas=Math.round(it.base||0),ks=new Set();
+    if(nf)for(const r of rs)if(numDoc(r.doc)===nf)ks.add(r.doc);
+    if(!ks.size)for(const r of rs){const v=Math.round(r.deb||r.cre||0);if(v&&(Math.abs(v-tot)<=2||Math.abs(v-bas)<=2))ks.add(r.doc);}
+    for(const k of ks)for(const r of rs){if(r.doc!==k||!(r.deb>0))continue;const fam=famGasto(r.cta,r.nom);if(fam){const mu=minTabla(fam);if(mu!=null)return{fam,mu,etq:OMIT_REF[fam].replace(/\s*\(.*$/,'')};}}
+    return null;};
   const items=[];
   for(const r of rec)items.push({origen:/equivalente/i.test(r.tipo)?'Doc. equivalente':'Factura',r,ter:r.nitE,nom:r.nomE,id:r.pref+r.folio,base:dianBase(r),ds:false});
   for(const r of ds)items.push({origen:'Documento soporte',r,ter:r.nitR,nom:r.nomR,id:r.pref+r.folio,base:dianBase(r),ds:true});
@@ -3328,12 +3335,14 @@ function ruleBaseDian(ctx){
       const obs=(d>0?'La retención se calculó sobre una base menor que la de la DIAN'+(Math.abs(razon-0.5)<0.01?' (la mitad: revisa si la factura mezcla conceptos no sujetos, como hospedaje)':' (revisa si la factura trae conceptos no sujetos o un descuento)'):'La base del reporte supera a la de la DIAN: revisa que no se haya retenido de más')+(min!=null&&it.base<min?'. La base de la DIAN no alcanza la mínima del concepto ('+fm(min)+')':'')+(it.via==='tercero y base'?'':'');
       const f=fila('Base distinta',it.o.doc,it.o.base,d,obs);rows.push(f);todos.push({it,est:'dist',doc:it.o.doc,baseC:it.o.base,dif:d,obs});continue;}
     const cand=(porTer[it.ter]||[]).filter(z=>!z.usado);
-    const sobreMin=!(minBase>0)||it.base>=minBase;
+    const cc=conceptoDe(it),minC=cc?cc.mu*(ctx.uvt||0):null,minIt=minC!=null?minC:minBase;   // la base mínima de SU concepto, y si no se conoce, la menor de la tabla
+    const sobreMin=!(minIt>0)||it.base>=minIt;
     if(cand.length&&sobreMin){nSinDoc++;const cs=cand.sort((a,b)=>Math.abs(a.base-it.base)-Math.abs(b.base-it.base)).slice(0,3).map(z=>z.doc+' ($'+fm(z.base)+')').join(', ');
       const f=fila('Sin documento contable enlazado','',null,null,'El tercero sí tiene retenciones en el reporte, pero ninguna con esta factura. Posibles: '+cs);rows.push(f);todos.push({it,est:'sindoc',doc:'',baseC:null,dif:null,obs:f.Observación});continue;}
     if(it.origen==='Doc. equivalente'||(ctx.led&&!contabilizado(it))){todos.push({it,est:'na',razon:it.origen==='Doc. equivalente'?'documento equivalente':'no está contabilizado',doc:'',baseC:null,dif:null,obs:ctx.led?'No contabilizado en el período (ver «Facturas DIAN recibidas» y «Documentos soporte»)':''});continue;}   // sin el explorador no se sabe si está contabilizado: se clasifica igual por la base
-    if(minBase>0&&it.base>=minBase&&!ex.has(it.ter)){nSinRet++;todos.push({it,est:'sinret',doc:'',baseC:null,dif:null,obs:ctx.led?'Contabilizado, supera la base mínima y no tiene retención en el reporte':'Supera la base mínima y no tiene retención en el reporte (sin el explorador no se sabe si está contabilizado)'});}   // solo informativo: lo lista «Gastos sin retención en la fuente»
-    else{todos.push({it,est:'bajo',doc:'',baseC:null,dif:null,obs:'Base no aplica: está bajo la base mínima o el tercero es exento'});}
+    const supera=cc?it.base>=minIt:(minBase>0&&it.base>=minBase);
+    if(supera&&!ex.has(it.ter)){nSinRet++;todos.push({it,est:'sinret',doc:'',baseC:null,dif:null,obs:ctx.led?'Contabilizado, supera la base mínima y no tiene retención en el reporte':'Supera la base mínima y no tiene retención en el reporte (sin el explorador no se sabe si está contabilizado)'});}   // solo informativo: lo lista «Gastos sin retención en la fuente»
+    else{const raz=cc&&!supera?cc.etq+': base mínima de '+cc.mu+' UVT = $'+fm(minC):'';todos.push({it,est:'bajo',doc:'',baseC:null,dif:null,razonBase:raz||undefined,obs:raz?'Base no aplica: '+raz+'; la base de la DIAN es $'+fm(it.base):'Base no aplica: está bajo la base mínima o el tercero es exento'});}
   }
   const sinDian=[...docs.values()].filter(o=>!o.usado).length;
   const orden={'Base distinta':0,'Sin documento contable enlazado':1};
@@ -3358,11 +3367,15 @@ function cruceLineasDian(ctx){
   const L=lineSource(ctx);if(!L)return{motivo:'lineas'};
   const lineas=L.filter(l=>l.a>0&&l.ter&&!CRUCE_NO_APLICA.includes(conceptoCuenta(ctx.rules,l.cta,l.nom)));
   if(!lineas.length)return{motivo:'sinlineas'};
-  const cand=(origen,r,ter)=>({origen,r,ter,id:(r.pref||'')+(r.folio||''),base:dianBase(r),usado:false});
+  const fechaTxt=s=>{const f=fechaISO(s);return f?f.slice(8,10)+'-'+f.slice(5,7)+'-'+f.slice(0,4):'';};   // dd-mm-aaaa, como se lee en la DIAN
+  const cand=(origen,r,ter)=>({origen,r,ter,id:(r.pref||'')+(r.folio||''),fecha:fechaTxt(r.fecha),base:dianBase(r),usado:false});
   const recT={},dsT={};
   for(const r of rec)(recT[r.nitE]=recT[r.nitE]||[]).push(cand('Recibidos',r,r.nitE));
   for(const r of ds)(dsT[r.nitR]=dsT[r.nitR]||[]).push(cand('Documentos soporte',r,r.nitR));
   const dd=a=>a.map(z=>z.id+' ($'+fm(z.base)+')').join(', ');
+  /* El comentario de lo que cruza: «Ok verificado con reporte DIAN FACTURA FV123 del 05-05-2026 por valor de $5.000.000.» (con varios documentos, cada uno con su fecha y su valor, y la suma) */
+  const tipoDoc=z=>z.origen==='Documentos soporte'?'DOCUMENTO SOPORTE':/equivalente/i.test((z.r&&z.r.tipo)||'')?'DOCUMENTO EQUIVALENTE':'FACTURA';
+  const ok=(a,extra)=>'Ok verificado con reporte DIAN '+a.map(z=>tipoDoc(z)+' '+z.id+(z.fecha?' del '+z.fecha:'')+' por valor de $'+fm(z.base)).join(' y ')+(a.length>1?' (suma $'+fm(a.reduce((s,z)=>s+z.base,0))+')':'')+'.'+(extra?' '+extra:'');
   // documentos sin usar del tercero cuya suma da la base: uno solo, una combinación de hasta 4, o todos (la base del reporte agrupa todos los del tercero)
   const buscar=(pool,b)=>{const p=pool.filter(z=>!z.usado&&z.base>0).sort((u,v)=>Math.abs(u.base-b)-Math.abs(v.base-b));
     const uno=p.find(z=>Math.abs(z.base-b)<=tol);if(uno)return[uno];
@@ -3381,10 +3394,9 @@ function cruceLineasDian(ctx){
         else{est='sin';obs='No aparece en la DIAN (ni en Recibidos ni en documentos soporte) en el período: revisa el soporte de la retención.';}
       }else{
         let m=buscar(RP,b);
-        if(m){est='rec';docs=m;obs='Cruza con la DIAN (Recibidos): '+dd(m)+(m.length>1?'; suma $'+fm(m.reduce((s,z)=>s+z.base,0)):'')+'.';}
-        else if((m=buscar(DP,b))){est='ds';docs=m;
-          obs='Cruza con la DIAN en documentos soporte: '+dd(m)+(m.length>1?'; suma $'+fm(m.reduce((s,z)=>s+z.base,0)):'')+'. '+(RP.length?'En Recibidos hay documentos de este tercero, pero con otra base.':'No aparece en Recibidos.');}
-        else if(RP.length&&DP.length&&(m=buscar(RP.concat(DP),b))){est='mixto';docs=m;obs='Cruza con la DIAN en recibidos y documentos soporte: '+dd(m)+'.';}
+        if(m){est='rec';docs=m;obs=ok(m);}
+        else if((m=buscar(DP,b))){est='ds';docs=m;obs=ok(m,RP.length?'En Recibidos hay documentos de este tercero, pero con otra base.':'No aparece en Recibidos.');}
+        else if(RP.length&&DP.length&&(m=buscar(RP.concat(DP),b))){est='mixto';docs=m;obs=ok(m);}
         else if(RP.length||DP.length){est='dif';docs=[];}   // se resuelve abajo: puede ser un documento repartido entre varias líneas del reporte, o una diferencia de base
         else{est='sin';obs='No aparece en la DIAN (ni en Recibidos ni en documentos soporte) en el período: revisa el soporte de la retención.';}
         if(est==='rec'||est==='ds'||est==='mixto')docs.forEach(z=>{z.usado=true;});
@@ -3400,7 +3412,7 @@ function cruceLineasDian(ctx){
         let m=buscar(RP,suma),o='rec';if(!m){m=buscar(DP,suma);o='ds';}if(!m&&RP.length&&DP.length){m=buscar(RP.concat(DP),suma);o='mixto';}
         if(m){m.forEach(z=>{z.usado=true;});
           for(const it of s){hechas.add(it);it.est=o;it.dif=null;it._docs=m;it.docs=m.map(z=>({id:z.id,origen:z.origen,base:z.base}));
-            it.obs='Cruza con la DIAN '+(o==='rec'?'(Recibidos)':o==='ds'?'en documentos soporte':'en recibidos y documentos soporte')+': '+dd(m)+'; la base del documento se reparte entre '+s.length+' líneas del reporte (cuentas '+s.map(z=>z.cta).join(' y ')+').';}}}
+            it.obs=ok(m,'La base del documento se reparte entre '+s.length+' líneas del reporte (cuentas '+s.map(z=>z.cta).join(' y ')+').');}}}
     }
     for(const it of mios.filter(z=>z.est==='dif')){   // lo que queda: el tercero sí está en la DIAN, pero la base no coincide
       const todos=RP.concat(DP),libres=todos.filter(z=>!z.usado),base=libres.length?libres:todos,cerca=base.slice().sort((u,v)=>Math.abs(u.base-it.base)-Math.abs(v.base-it.base))[0];
@@ -12521,7 +12533,7 @@ function comentarioDian(x,obs){
     if(/régimen SIMPLE/.test(lista)){const [rot,...resto]=lista.split(' · ');return cap(rot)+': no aplica retención en la fuente'+(resto.length?' · '+resto.join(' · '):'');}
     return cap(lista)+': no aplica retención';
   }
-  if(est==='bajo')return 'Base no aplica';
+  if(est==='bajo')return 'Base no aplica'+(x&&x.razonBase?' ('+x.razonBase+')':'');
   if(est==='ok'||est==='agrup')return 'Ok rte aplicada';
   return 'Revisar';
 }
@@ -14381,7 +14393,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega78';
+const APP_ENTREGA='fase4b-entrega79';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
