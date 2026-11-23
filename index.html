@@ -1353,7 +1353,7 @@ const MENSAJES = {
     texto: 'La factura {documento} de {emisor} por {base} no tiene retención en la fuente en la contabilidad y, por su base, debería tenerla ({concepto}, desde {minimo}).',
     ayuda: 'Revisa el asiento {asiento}: si la retención se omitió, corrígela. Si el proveedor no está sujeto (por ejemplo, régimen simple o autorretenedor), márcalo como exento en el perfil del cliente.',
     vars: ['documento', 'emisor', 'base', 'concepto', 'minimo', 'asiento'],
-    ejemplo: {documento:'FE79858940',emisor:'Inter Rapidísimo S.A.',base:'$452.900',concepto:'servicios',minimo:'$104.748',asiento:'CC-14-940'}
+    ejemplo: {documento:'FE1234',emisor:'Proveedor de Ejemplo S.A.S.',base:'$150.000',concepto:'servicios',minimo:'$104.748',asiento:'CC-14-940'}
   },
 
   /* ---------- Falla interna ---------- */
@@ -1749,7 +1749,7 @@ function parseBalanceEstandar(rows){
   const h=findHeader(rows,c=>c.some(esCta)&&c.some(esDeb)&&c.some(esCre)&&!c.some(x=>x.startsWith('documento')));
   if(!h)return{err:'No encontré el encabezado del balance (Cuenta, Débitos, Créditos).'};
   const c=h.cells;
-  const ix={cta:idx(c,esCta),nom:idx(c,x=>x.startsWith('descripcion')||x.startsWith('nombre')||x==='nomcta'),
+  const iT=c.indexOf('tercero'),ix={cta:idx(c,esCta),nom:idx(c,x=>x.startsWith('descripcion')||x.startsWith('nombre')||x==='nomcta'),
     sa:idx(c,x=>x.startsWith('saldo anterior')||x.startsWith('saldo inicial')||x.startsWith('s inicial')||x.startsWith('sdo inicial')||x.startsWith('sdo anterior')),deb:idx(c,esDeb),cre:idx(c,esCre)};   // «NomCta», «S_Inicial» y «S_Final» (encabezados abreviados de algunos programas)
   const sfs=c.map((x,i)=>(x.startsWith('saldo')||x.startsWith('s final')||x.startsWith('sdo final'))&&i!==ix.sa?i:-1).filter(i=>i>=0);ix.sf=sfs.length?sfs[sfs.length-1]:-1;
   const fechasCol=c.map((x,i)=>/^\d{1,2} \d{1,2} \d{4}/.test(x)?i:-1).filter(i=>i>=0);
@@ -1762,15 +1762,26 @@ function parseBalanceEstandar(rows){
     if(!/^\d+$/.test(code))continue;
     const sa=num(r[ix.sa])||0,deb=num(r[ix.deb])||0,cre=num(r[ix.cre])||0;
     const sf=ix.sf>=0&&num(r[ix.sf])!=null?num(r[ix.sf]):sa+deb-cre;
-    out.push({cta:code,nom:String(r[ix.nom]||'').trim(),sa,deb,cre,sf});
+    const o={cta:code,nom:String(r[ix.nom]||'').trim(),sa,deb,cre,sf};
+    if(iT>=0){const tt=String(r[iT]==null?'':r[iT]).replace(/\s+/g,' ').trim();if(tt){o.terTxt=tt;o.ter=((/(\d[\d.]*)\s*$/.exec(tt)||[])[1]||'').replace(/\./g,'');}}   // balance por tercero: la columna «Tercero» trae «NIT  800197268» o «CC  35468873»
+    out.push(o);
   }
   if(!out.length)return{err:'El balance no tiene filas con código de cuenta numérico.'};
+  /* Balance por tercero («método 2»): cada cuenta trae su fila (sin tercero), con el saldo de la cuenta, y debajo una fila por tercero con el mismo código. Los saldos de la cuenta son los de su fila; los de cada tercero quedan de detalle (no se cuentan dos veces). */
+  let porTercero=false,terceros=[],cuentas=out;
+  if(iT>=0&&out.some(x=>x.terTxt)){porTercero=true;const g=new Map(),sm=(a,k)=>a.reduce((s,x)=>s+x[k],0);
+    for(const x of out){const q=g.get(x.cta)||{padre:null,hijos:[]};if(x.terTxt)q.hijos.push(x);else if(!q.padre)q.padre=x;g.set(x.cta,q);}
+    cuentas=[];for(const [cta,q] of g){cuentas.push(q.padre||{cta,nom:'',sa:sm(q.hijos,'sa'),deb:sm(q.hijos,'deb'),cre:sm(q.hijos,'cre'),sf:sm(q.hijos,'sf')});for(const h of q.hijos)terceros.push(h);}}
   /* Saldos por naturaleza (pasivo, patrimonio e ingresos en positivo): se reconocen por la aritmética de las cuentas de pasivo, patrimonio e ingresos con movimiento (saldo anterior + créditos − débitos = saldo final, y no al revés)
      y se pasan al signo contable (crédito en negativo), como hace parseBalanceReporte; si la aritmética con signo cuadra, no se toca nada. */
-  const cr=out.filter(x=>/^[234]/.test(x.cta)&&(x.deb||x.cre));
-  if(cr.length>=5){const fN=cr.filter(x=>Math.abs(x.sa-x.deb+x.cre-x.sf)<=1.5).length/cr.length,fS=cr.filter(x=>Math.abs(x.sa+x.deb-x.cre-x.sf)<=1.5).length/cr.length;
-    if(fN>=0.9&&fS<=0.3)return{rows:out.map(x=>'15678'.includes(x.cta[0])?x:Object.assign({},x,{sa:0-x.sa,sf:0-x.sf})),formato:'balance con saldos por naturaleza (pasivo, patrimonio e ingresos en positivo), pasados al signo contable',naturaleza:true};}
-  return{rows:out};
+  const cr=cuentas.filter(x=>/^[234]/.test(x.cta)&&(x.deb||x.cre));let nat=false;
+  if(cr.length>=5){const fN=cr.filter(x=>Math.abs(x.sa-x.deb+x.cre-x.sf)<=1.5).length/cr.length,fS=cr.filter(x=>Math.abs(x.sa+x.deb-x.cre-x.sf)<=1.5).length/cr.length;nat=fN>=0.9&&fS<=0.3;}
+  const flip=x=>'15678'.includes(x.cta[0])?x:Object.assign({},x,{sa:0-x.sa,sf:0-x.sf}),TXN='saldos por naturaleza (pasivo, patrimonio e ingresos en positivo), pasados al signo contable';
+  if(!nat&&!porTercero)return{rows:out};
+  const res={rows:nat?cuentas.map(flip):cuentas};
+  if(nat){res.naturaleza=true;res.formato=porTercero?'balance por tercero: se usan los saldos de cada cuenta y los de cada tercero quedan de detalle · '+TXN:'balance con '+TXN;}
+  if(porTercero){res.porTercero=true;res.terceros=nat?terceros.map(flip):terceros;if(!nat)res.formato='balance por tercero: se usan los saldos de cada cuenta y los de cada tercero quedan de detalle';}
+  return res;
 }
 
 /* Auxiliar de contabilidad general en formato reporte: bloques «CUENTA: código nombre … SALDO», con fecha, tipo, documento, NIT, descripción, débitos, créditos y saldo en columnas sueltas */
@@ -2174,27 +2185,59 @@ function parseAuxiliarRetencionesBase(rows){
   const ms=[...meses].sort();
   return{rows:out,hasBase:conBase>0,formato:'auxiliar de retenciones con base (Cuenta, Nomcta, Nit, Cliente, Tipo, Número, Fecha, Concepto, Base, Débito, Crédito)',meses:ms,multiMes:ms.length>1,pagosExcluidos:pagos,totalInforme:tot,avisos};
 }
+/* El «Libro Auxiliar» impreso en PDF (Access): Tercero (cortado a 26 letras), Fecha, Nota (cortada), Cheque, Doc. #, Débitos, Créditos y Saldo, por cuenta, con «SALDO INICIAL» y «Total para …». Un renglón puede ocupar dos líneas (el documento y los importes bajan a la segunda).
+   Se convierte a las mismas filas del Excel del libro auxiliar (Cuenta, Tercero, Fecha, Nota, Cheque, Doc Num, Débitos, Créditos, Saldo) para leerlo con parseLibroAuxiliarGeneral. Devuelve null si no es ese libro; «descartadas» cuenta los renglones con fecha que no se pudieron completar. */
+function filasDeLibroAuxiliarPdf(lines){
+  const L=(lines||[]).map(l=>String(l==null?'':l).replace(/\s+/g,' ').trim()).filter(Boolean);
+  if(!L.some(l=>/^Libro Auxiliar\b/i.test(l))||!L.some(l=>/^Tercero Fecha Nota\b/i.test(l)))return null;
+  const AM='(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})',reAm=new RegExp(AM+' '+AM+' '+AM+'$'),n=s=>parseFloat(s.replace(/\./g,'').replace(',','.')),rows=[],FE=/\d{2}\/\d{2}\/\d{4}/;
+  let cta='',buf='',desc=0;
+  const cerrar=()=>{if(!buf)return;const m=reAm.exec(buf);
+    if(!m){desc++;buf='';return;}
+    const antes=buf.slice(0,m.index).trim(),dm=/^(.*?)\s*(\d{2}\/\d{2}\/\d{4})\s*(.*)$/.exec(antes);buf='';if(!dm)return;
+    let ter=dm[1].trim(),rest=dm[3].trim();if(/^SALDO INICIAL\b/i.test(rest))return;
+    const ip=rest.lastIndexOf('('),doc=ip>=0&&/^\([A-Za-z0-9-]+\)\s+\S/.test(rest.slice(ip))?rest.slice(ip).trim():'';if(doc)rest=rest.slice(0,ip).trim();
+    const mc=/^(.*?)\s+(TRANSF|CHEQUE|CH\s?\d*)$/i.exec(rest),nota=mc?mc[1].trim():rest,chq=mc?mc[2]:'';
+    rows.push([cta,ter,dm[2],nota,chq,doc,n(m[1]),n(m[2]),n(m[3])]);};
+  for(let i=0;i<L.length;i++){const l=L[i];
+    if(/^Libro Auxiliar\b/i.test(l)||/^Tercero Fecha Nota\b/i.test(l)||/^NIT\s+[\d.\-]+$/i.test(l)||/^P[aá]gina\b/i.test(l)||(L[i+1]&&/^NIT\s+[\d.\-]+$/i.test(L[i+1])))continue;   // encabezado de cada página
+    if(/^Fecha y Hora de Impresi[oó]n\b/i.test(l)){cerrar();continue;}   // el pie de cada página (trae una fecha, pero no es un renglón)
+    if(/^Total para\b/i.test(l)){cerrar();continue;}
+    if(reAm.test(l)&&/^[-\d.,\s]+$/.test(l)){if(buf){desc++;buf='';}continue;}   // una línea solo de importes es el total de la cuenta: nunca completa un renglón
+    const mcta=/^(\d{4,})\s+(\D.*)$/.exec(l);
+    if(mcta&&!FE.test(l)&&!reAm.test(l)){cerrar();cta=mcta[1]+' '+mcta[2];continue;}   // «23651502 HONORARIOS DECLARANTES 11%»
+    if(FE.test(l)){cerrar();buf=l;if(reAm.test(buf))cerrar();continue;}
+    if(buf){buf+=' '+l;if(reAm.test(buf))cerrar();continue;}   // la segunda línea del renglón: el documento y los importes
+  }
+  cerrar();
+  if(!rows.length)return null;
+  return{rows:[['Cuenta','Tercero','Fecha','Nota','Cheque','Doc Num','Debitos','Creditos','Saldo'].concat(desc?['Rev PDF: '+desc+(desc===1?' renglón':' renglones')]:[])].concat(rows),descartadas:desc};
+}
 /* «Libro Auxiliar» de todas las cuentas exportado a Excel (hoja «ExportarAExcel»): Cuenta (código y nombre, solo en la primera fila de cada bloque), MesLetras, Tercero (solo el nombre), Fecha, Nota, Cheque, Doc Num, Débitos, Créditos y Saldo,
    con filas de saldo inicial, de mes y de totales. No trae NIT ni base: las revisiones por tercero trabajan por el nombre y la base solo se estima si el nombre de la cuenta trae la tarifa. */
 function parseLibroAuxiliarGeneral(rows){
-  const h=findHeader(rows,c=>c.includes('cuenta')&&c.includes('mesletras')&&c.includes('tercero')&&c.includes('fecha')&&c.includes('debitos')&&c.includes('creditos'));
+  const h=findHeader(rows,c=>c.includes('cuenta')&&c.includes('tercero')&&c.includes('fecha')&&c.includes('debitos')&&c.includes('creditos')&&(c.includes('mesletras')||(c.includes('nota')&&c.includes('doc num'))));   // con «MesLetras» o, sin ella, con «Nota» y «Doc Num»
   if(!h)return{err:'No encontré el encabezado del libro auxiliar (Cuenta, MesLetras, Tercero, Fecha, Débitos, Créditos).'};
-  const c=h.cells,ix={cta:c.indexOf('cuenta'),ter:c.indexOf('tercero'),fec:c.indexOf('fecha'),nota:c.indexOf('nota'),chq:c.indexOf('cheque'),doc:c.findIndex(x=>x==='doc num'||x==='docnum'),deb:c.indexOf('debitos'),cre:c.indexOf('creditos')};
-  const tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim(),out=[],meses=new Set(),nomsIca=new Map();let cta='',nom='',pagos=0,sd=0,sc=0;
+  const c=h.cells,ix={cta:c.indexOf('cuenta'),mes:c.indexOf('mesletras'),ter:c.indexOf('tercero'),fec:c.indexOf('fecha'),nota:c.indexOf('nota'),chq:c.indexOf('cheque'),doc:c.findIndex(x=>x==='doc num'||x==='docnum'),deb:c.indexOf('debitos'),cre:c.indexOf('creditos')};
+  const tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim(),out=[],meses=new Set(),nomsIca=new Map();let cta='',nom='',pagos=0,sd=0,sc=0,conNit=0;
   for(let i=h.i+1;i<rows.length;i++){const r=rows[i]||[],a=tx(r[ix.cta]);
-    if(/^total\b/i.test(a)||/^total\b/i.test(tx(r[ix.cta+1])))continue;
+    if(/^total\b/i.test(a)||(ix.mes>=0&&/^total\b/i.test(tx(r[ix.mes]))))continue;
     const m=/^(\d{4,})\s+(.*)$/.exec(a);if(m){cta=m[1];nom=m[2].trim();}
     const f=r[ix.fec],nota=ix.nota>=0?tx(r[ix.nota]):'';
-    if(!cta||typeof f!=='number'||f<40000||f>80000||/^saldo inicial/i.test(nota)||/^saldo inicial/i.test(tx(r[ix.cta+1])))continue;
+    const fOk=typeof f==='number'?(f>=40000&&f<=80000):/^\d{2}\/\d{2}\/\d{4}$/.test(tx(f));   // la fecha es un número de Excel o texto dd/mm/aaaa (si el libro viene de un PDF)
+    if(!cta||!fOk||/^saldo inicial/i.test(nota)||(ix.mes>=0&&/^saldo inicial/i.test(tx(r[ix.mes]))))continue;
     const deb=num(r[ix.deb])||0,cre=num(r[ix.cre])||0;if(!deb&&!cre)continue;if(/^2368/.test(cta)&&!nomsIca.has(cta))nomsIca.set(cta,nom);
-    const fecha=serialAFecha(f),mf=/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/.exec(fecha);if(mf)meses.add(mf[3]+'-'+mf[2].padStart(2,'0'));
-    const terN=tx(r[ix.ter]),ret=/^236[578]/.test(cta),ica=/^2368/.test(cta);let ctaX=cta,nomX=nom,pago=false,cierre=false,ctaPagada;
-    if(ret&&deb>0&&!cre){pago=ica?esPagoIca('',terN,nota):(/direcci[oó]n de impuestos y aduanas/i.test(terN)||/(canc|pago).{0,25}(retefuente|retenci[oó]n|rete ?iva|rte)/i.test(nota));
+    const fecha=typeof f==='number'?serialAFecha(f):tx(f),mf=/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/.exec(fecha);if(mf)meses.add(mf[3]+'-'+mf[2].padStart(2,'0'));
+    const terTxt=tx(r[ix.ter]),mn=/^(.*?)\s*\b(?:nit|cc|c\.c|ce|cedula|cédula)\b\.?\s*:?\s*([\d.\-]+)\s*$/i.exec(terTxt),terN=mn?mn[1].trim():terTxt,terId=mn?(nitBase(mn[2].replace(/\./g,''))||mn[2].replace(/\D/g,'')):'';   // el tercero puede traer su NIT: «TELESENTINEL LTDA Nit: 800014875»
+    if(terId)conNit++;
+    const ret=/^236[578]/.test(cta),ica=/^2368/.test(cta);let ctaX=cta,nomX=nom,pago=false,cierre=false,ctaPagada;
+    if(ret&&deb>0&&!cre){pago=ica?esPagoIca(terId,terN,nota):(String(terId)===_DIAN_NIT||/direcci[oó]n de impuestos y a(?:duanas)?\b/i.test(terN)||/(canc|pago).{0,25}(retefuente|retenci[oó]n|rete ?iva|rte)/i.test(nota));
       if(pago){ctaPagada=cta;ctaX=ica?'236899':'23657599';nomX=ica?'PAGO DE RETENCIONES (SECRETARÍA DE HACIENDA)':'PAGO DE RETENCIONES (DIAN)';pagos++;cierre=/reclasificaci[oó]n|causaci[oó]n|cierre de impuestos/i.test(nota);}}
     sd+=deb;sc+=cre;
-    out.push({fecha,doc:ix.doc>=0?tx(r[ix.doc]):'',asiento:'',fuente:ix.chq>=0?tx(r[ix.chq]):'',cta:ctaX,ctaOrig:pago?cta:undefined,nom:nomX,ter:'',terRaw:'',terN,desc:nota,cc:'',deb,cre,base:null,ret:null,pago:pago||undefined,cierre:cierre||undefined,ctaPagada});}
+    out.push({fecha,doc:ix.doc>=0?tx(r[ix.doc]):'',asiento:'',fuente:ix.chq>=0?tx(r[ix.chq]):'',cta:ctaX,ctaOrig:pago?cta:undefined,nom:nomX,ter:terId,terRaw:mn?mn[2]:'',terN,desc:nota,cc:'',deb,cre,base:null,ret:null,pago:pago||undefined,cierre:cierre||undefined,ctaPagada});}
   if(!out.length)return{err:'No encontré movimientos en el libro auxiliar.'};
-  const avisos=['Este libro auxiliar no trae el NIT de los terceros (solo el nombre) ni la base de las retenciones: las revisiones por tercero trabajan por el nombre y la base solo se puede estimar si el nombre de la cuenta trae la tarifa; para la base carga también el auxiliar de retenciones con base.'];
+  const sinNitL=conNit<out.length*0.5,avisos=sinNitL?['Este libro auxiliar no trae el NIT de los terceros (solo el nombre) ni la base de las retenciones: las revisiones por tercero trabajan por el nombre y la base solo se puede estimar si el nombre de la cuenta trae la tarifa; para la base carga también el auxiliar de retenciones con base.']:['Este libro auxiliar no trae la base de las retenciones: solo se puede estimar si el nombre de la cuenta trae la tarifa; para la base carga también el auxiliar de retenciones con base.'];
+  const pdfAv=(rows[h.i]||[]).map(tx).find(x=>/^rev pdf/i.test(x));if(pdfAv)avisos.push('Del PDF no se pudieron leer algunos renglones ('+pdfAv.replace(/^rev pdf:?\s*/i,'')+'): conviene cargar el auxiliar en Excel.');
   const bta=[...nomsIca].filter(([,n])=>/\b(BTA|BOGOT[AÁ])\b/i.test(n)),otras=[...nomsIca].filter(([,n])=>!/\b(BTA|BOGOT[AÁ])\b/i.test(n));   // cuentas de ICA de más de un municipio
   if(bta.length&&otras.length)avisos.push('Hay cuentas de ICA con «BTA» o Bogotá en el nombre (p. ej. '+bta[0][0]+' '+bta[0][1]+') y otras sin él (p. ej. '+otras[0][0]+' '+otras[0][1]+'): si el cliente declara ICA en más de un municipio, esta revisión las toma todas juntas.');
   const ti=rows.findIndex(r=>/^total movimientos/i.test(tx((r||[])[ix.cta])));let totalMov=null;
@@ -2202,7 +2245,7 @@ function parseLibroAuxiliarGeneral(rows){
   let entidad='',corte='',corteTxt='';const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   for(const r of rows.slice(0,h.i))for(const v of r||[]){const s=tx(v);if(!s)continue;const m=/entre el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+y el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(s);if(m){corte=m[6]+'-'+m[5].padStart(2,'0');corteTxt=MES[+m[5]-1]+' de '+m[6];}else if(!entidad&&/[A-Za-zÁÉÍÓÚÑ]{4}/.test(s)&&!/^libro/i.test(s))entidad=s;}
   const ms=[...meses].sort();
-  return{rows:out,hasBase:false,formato:'libro auxiliar de todas las cuentas (sin NIT del tercero ni base)',sinNitLibro:true,meses:ms,multiMes:ms.length>1,pagos,totalMov,corte,corteTxt,entidad,avisos};
+  return{rows:out,hasBase:false,formato:sinNitL?'libro auxiliar de todas las cuentas (sin NIT del tercero ni base)':'libro auxiliar de todas las cuentas (sin base)',sinNitLibro:sinNitL,meses:ms,multiMes:ms.length>1,pagos,totalMov,corte,corteTxt,entidad,avisos};
 }
 /* Fechas de un archivo que mezcla números de Excel y texto «m/d/aaaa» o «d/m/aaaa»: el orden del texto lo da el propio archivo (un valor con el primer número mayor que 12 es día/mes; con el segundo mayor que 12, mes/día); si no hay ninguno, día/mes. */
 function ordenFechas(rows,col){let dm=0,md=0;for(const r of rows||[]){const v=(r||[])[col];if(typeof v!=='string')continue;const m=/^\s*(\d{1,2})[-\/](\d{1,2})[-\/]\d{4}\s*$/.exec(v);if(!m)continue;const a=+m[1],b=+m[2];if(a>12&&b<=12)dm++;else if(b>12&&a<=12)md++;}return md>dm?'mdy':'dmy';}
@@ -13136,7 +13179,7 @@ const XLS='.xlsx,.xls,.xlsm,.csv';
 const SLOTS=[
  {k:'bal',t:'Balance de prueba (Mayor y balances)',h:'Excel o PDF exportado de tu programa contable (con texto). Cuenta, descripción, saldo anterior, débitos, créditos y saldo.',acc:XLS+',.pdf'},
  {k:'form',t:'Borrador del formulario 350',h:'Excel con la hoja F350 del cliente (lo mejor), o PDF/imagen: se lee en tu navegador con lectura de imágenes gratuita y tú confirmas los valores en la tabla de abajo.',acc:XLS+',.pdf,.png,.jpg,.jpeg'},
- {k:'led',t:'Movimiento contable (explorador de contabilidad o auxiliares)',h:'Documento, cuenta, tercero, débito y crédito. Sirve el explorador de contabilidad o varios auxiliares de tu programa contable (puedes elegir varios archivos). Habilita los cruces con la DIAN y la búsqueda de retención omitida.',multi:true,acc:XLS},
+ {k:'led',t:'Movimiento contable (explorador de contabilidad o auxiliares)',h:'Documento, cuenta, tercero, débito y crédito. Sirve el explorador de contabilidad o varios auxiliares de tu programa contable (puedes elegir varios archivos). Habilita los cruces con la DIAN y la búsqueda de retención omitida. También sirve el auxiliar en PDF (con texto) exportado de tu programa.',multi:true,acc:XLS+',.pdf'},
  {k:'det',t:'Auxiliar de retenciones con base',h:'Auxiliar de tu programa contable por cuenta, tercero y documento con valor base. Habilita tarifas, bases mínimas y duplicados. Si el programa separa la retención en la fuente y el IVA en dos informes de compras, elige los dos archivos (o agrégalos uno por uno): se unen.',multi:true,acc:XLS},
  {k:'dian',t:'DIAN: movimiento del portal (recibidos y documentos soporte)',h:'El reporte tal como se descarga, con todos los tipos de documento. La app lo separa y filtra por el período. Si el cliente lo envió por partes (por ejemplo, los recibidos en un archivo y los emitidos en otro), elige todos los archivos juntos o agrégalos uno por uno: se tratan como un solo reporte.',multi:true,acc:XLS},
  {k:'nom',t:'Retención por nómina (planillas o reporte de retefuente)',h:'Una o varias hojas con la columna Retefuente.',multi:true,acc:XLS},
@@ -13450,7 +13493,10 @@ async function loadSlot(k,files,opc){
     DD[k]={names,parsed:pdfRes,info:pdfRes.rows.length.toLocaleString('es-CO')+' cuentas leídas del PDF'+(pdfRes.leidoComo?' · OJO: Leído como '+pdfRes.leidoComo+'; tu perfil dice '+pdfRes.perfilDice:'')+(ctP.avisos.length?' · OJO: '+ctP.avisos.join(' · '):''),warn:ctP.avisos.length>0||!!pdfRes.leidoComo};return;
   }
   const porArchivo=[];
-  try{for(const f of files){names.push(f.name);const sh=await readSheets(f);porArchivo.push(sh);all.push(...sh);}}catch(e){DD[k]={names,err:e&&e.pesado?'Este archivo es demasiado pesado para abrirlo en este navegador: Excel guardó cientos de miles de filas vacías. Ábrelo en Excel, borra las filas y columnas sobrantes (Ctrl+Fin te lleva al final real) y guárdalo de nuevo.':'No pude leer el archivo. Verifica que sea Excel (.xlsx, .xls) o CSV.'};return;}
+  try{for(const f of files){names.push(f.name);let sh;
+    if(k==='led'&&/\.pdf$/i.test(f.name)){const fl=filasDeLibroAuxiliarPdf(await pdfLines(f));if(!fl){DD[k]={names,err:'Leí el PDF, pero no es un «Libro Auxiliar» (Tercero, Fecha, Nota, Doc. #, Débitos, Créditos y Saldo por cuenta). Súbelo en Excel o carga el libro correcto.'};return;}sh=[{name:'PDF',rows:fl.rows}];}   // el auxiliar en PDF se vuelve las mismas filas del Excel
+    else sh=await readSheets(f);
+    porArchivo.push(sh);all.push(...sh);}}catch(e){DD[k]={names,err:e&&e.pesado?'Este archivo es demasiado pesado para abrirlo en este navegador: Excel guardó cientos de miles de filas vacías. Ábrelo en Excel, borra las filas y columnas sobrantes (Ctrl+Fin te lleva al final real) y guárdalo de nuevo.':'No pude leer el archivo. Verifica que sea Excel (.xlsx, .xls) o CSV.'};return;}
   const cmpK=(a,b)=>{for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1;}return 0;};
   const mesesP=mesesDelPeriodo(S.imp,S.period,S.per&&S.per.reteica);   // los meses que se están revisando: la hoja con datos de esos meses gana a una de otro período
   // entre las hojas de un libro gana la VISIBLE de más filas (antes, la de más filas aunque estuviera oculta); «clave» antepone otros criterios
@@ -14415,7 +14461,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega80';
+const APP_ENTREGA='fase4b-entrega81';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
