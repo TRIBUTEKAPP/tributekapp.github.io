@@ -1727,7 +1727,7 @@ function parseBalanceSaldosFechas(rows){
   return r;
 }
 function parseBalance(rows){
-  if(!parseMovimientoPlano(rows).err||!parseLibroAuxiliarGeneral(rows).err||!parseAuxiliarRetencionesBase(rows).err||!parseAuxiliarBasesTercero(rows).err)return{err:'Es un movimiento contable, no un balance de prueba.'};const bc=parseBalanceComprobacion(rows);if(!bc.err)return bc;
+  if(!parseMovimientoPlano(rows).err||!parseLibroAuxiliarGeneral(rows).err||!parseAuxiliarRetencionesBase(rows).err||!parseAuxiliarBasesTercero(rows).err||!parseBasesPorCuentaPJPN(rows).err)return{err:'Es un movimiento contable, no un balance de prueba.'};const bc=parseBalanceComprobacion(rows);if(!bc.err)return bc;
   const sa=parseBalanceSalud(rows);if(!sa.err)return sa;   // libro mayor general del software de salud (encabezado propio)
   const nc=parseBalanceNombreCompuesto(rows);if(!nc.err)return nc;   // código y nombre juntos en una columna «Nombre» (encabezado propio)
   const sg=parseBalanceSiigo(rows);if(!sg.err)return sg;   // SIIGO primero: el lector estándar leería mal su código de cuenta
@@ -1881,7 +1881,7 @@ function tipoMovimientoConocido(hojas){   // ¿es un movimiento o un auxiliar co
     try{if(!parseRelacionSiesa(rows).err)return{slot:'det',parece:'relación de retenciones de Siesa'};}catch(e){}
     try{if(!parseMovimientoAuxiliarNube(rows).err)return{slot:'led',parece:'movimiento auxiliar por cuenta contable de SIIGO Nube'};}catch(e){}
     try{if(!parseMovimientoPlano(rows).err||!parseLibroAuxiliarGeneral(rows).err)return{slot:'led',parece:'movimiento contable plano'};}catch(e){}
-    try{if(!parseReporteBasesGravadas(rows).err||!parseBasesGravadasSinEncabezado(rows).err||!parseAuxiliarRetencionesBase(rows).err||!parseAuxiliarBasesTercero(rows).err)return{slot:'det',parece:'reporte de bases gravadas'};}catch(e){}
+    try{if(!parseReporteBasesGravadas(rows).err||!parseBasesGravadasSinEncabezado(rows).err||!parseAuxiliarRetencionesBase(rows).err||!parseAuxiliarBasesTercero(rows).err||!parseBasesPorCuentaPJPN(rows).err)return{slot:'det',parece:'reporte de bases gravadas'};}catch(e){}
     try{if(!parseBalanceComprobacion(rows).err)return{slot:'bal',parece:'balance de comprobación'};}catch(e){}
     try{if(!parseMovimientoSiesa(rows).err)return{slot:'led',parece:'movimiento de cuentas de Siesa'};}catch(e){}
     try{if(!parseBalanceNombreCompuesto(rows).err)return{slot:'bal',parece:'código y nombre en una columna'};}catch(e){}
@@ -2099,6 +2099,27 @@ function esPagoIca(ter,terN,nota){return String(ter)==='899999061'||/secretar[i�
 /* Las fechas del auxiliar de retenciones pueden venir con el día y el mes intercambiados (Excel las leyó al revés) y el auxiliar no trae la columna «Mes»: la hoja de movimiento del mismo libro sí, y comparte el tipo y el número del documento. */
 function corregirFechasConMovimiento(rows,mov){const m=new Map();for(const x of mov||[])if(x.asiento&&!m.has(x.asiento))m.set(x.asiento,x.fecha);let n=0;
   const out=(rows||[]).map(r=>{const f=m.get(r.asiento);if(f&&f!==r.fecha){n++;return Object.assign({},r,{fecha:f,fechaCorregida:true});}return r;});return{rows:out,corregidas:n};}
+/* Auxiliar de retenciones con base POR BLOQUES DE CUENTA («236515 - Honorarios», «236525 - Servicios»…), cada uno con su encabezado: Id. Tercero, Nombre, # Documento, Valor base, Valor (la retención), % y Balance, y las columnas de BASE y RETENCIÓN separadas
+   para personas jurídicas (PJ) y naturales (PN), más el concepto del documento. Cada bloque cierra con «TOTALES :» y el libro, con un total general. No trae fecha: las líneas quedan sin ella (la fecha, si se carga el movimiento, sale de allí). */
+function parseBasesPorCuentaPJPN(rows){
+  const nz=s=>norm(String(s==null?'':s)),tx=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+  const out=[],avisos=[];let cta='',nom='',c=null,grand=null,bloques=0;
+  for(const r0 of rows||[]){const r=r0||[],a=tx(r[0]),m=typeof r[0]==='string'?/^(\d{4,})\s*-\s*(.+)$/.exec(a):null;
+    if(m&&!/^\d{5,}-\d$/.test(a)){cta=m[1];nom=m[2].trim();c=null;bloques++;continue;}   // «236515 - Honorarios» (y no un NIT con su dígito de verificación)
+    const t=r.map(nz);
+    if(t.includes('id tercero')&&t.includes('valor base')){const bs=t.map((x,i)=>x==='base'?i:-1).filter(i=>i>=0),rs=t.map((x,i)=>x==='retencion'?i:-1).filter(i=>i>=0),vi=t.indexOf('valor');
+      c={ter:t.indexOf('id tercero'),nom:t.indexOf('nombre'),doc:t.findIndex(x=>/documento/.test(x)),base:t.indexOf('valor base'),ret:vi,pjB:bs[0]??-1,pjR:rs[0]??-1,pnB:bs[1]??-1,pnR:rs[1]??-1};c.con=Math.max(c.pjR,c.pnR)+1;c.pct=c.ret>=0?c.ret+3:-1;continue;}
+    if(!c||!cta)continue;
+    if(/totales/i.test(a+tx(r[8]))){const gb=num(r[10]),gr=num(r[13]);if(gb!=null&&gr!=null&&r[16]===''&&r[18]===''){grand={base:gb,ret:gr};}continue;}   // el total general (sin las columnas PJ/PN) cierra el libro
+    const idv=r[c.ter],id=typeof idv==='number'?String(idv):tx(idv),doc=c.doc>=0?tx(r[c.doc]):'',base=num(r[c.base]),ret=num(r[c.ret]);
+    if(!id||!doc||base==null||ret==null)continue;
+    const pj=c.pjB>=0?num(r[c.pjB])||0:0,pn=c.pnB>=0?num(r[c.pnB])||0:0,tp=pj>0?'PJ':pn>0?'PN':null,concepto=c.con>0?tx(r[c.con]):'',pv=c.pct>=0?r[c.pct]:'';
+    const pct=typeof pv==='number'?(pv<=1?pv*100:pv):(parseFloat(String(pv).replace('%','').replace(',','.'))||null),fm_=/fact(?:ura)?\.?\s*([A-Za-z0-9]+-?\d+)/i.exec(concepto);
+    out.push({fecha:'',doc,asiento:doc,fuente:'',cta,nom,ter:nitBase(id)||id,terRaw:id,terN:c.nom>=0?tx(r[c.nom]):'',desc:concepto,cc:'',deb:ret<0?-ret:0,cre:ret>0?ret:0,base:ret<0?-Math.abs(base):Math.abs(base),ret:null,tarifaInforme:pct,concepto,tp,docFactura:fm_?fm_[1]:''});}
+  if(!bloques||!out.length)return{err:'No encontré el auxiliar de retenciones por bloques de cuenta (cada bloque con «Id. Tercero», «Valor base» y su cuenta).'};
+  if(grand){const sb=out.reduce((s,x)=>s+(x.base||0),0),sr=out.reduce((s,x)=>s+x.cre-x.deb,0);if(Math.abs(sb-grand.base)>1||Math.abs(sr-grand.ret)>1)avisos.push('El detalle suma base $'+fm(sb)+' y retención $'+fm(sr)+', pero el total general del libro dice base $'+fm(grand.base)+' y retención $'+fm(grand.ret)+'.');}
+  return{rows:out,hasBase:true,formato:'auxiliar de retenciones con base por cuenta (Id. Tercero, Nombre, # Documento, Valor base, Valor y %; con las columnas de base y retención de personas jurídicas y naturales)',bloques,totalInforme:grand,avisos};
+}
 /* Auxiliar de retenciones con base y tercero de un programa contable (hoja «Bases»): Núm. oper., Fecha, Tipo doc., No. docum., Detalle opr., Cuenta, Nombre cuenta, Tercero (NIT), Nombre tercero, Valor base, Débitos y Créditos,
    con una fila «TOTAL GENERAL» al final y, a la derecha, una columna sin rótulo con la tarifa que calculó quien lo trabaja (no se usa: sería comparar la retención consigo misma). */
 function parseAuxiliarBasesTercero(rows){
@@ -4590,7 +4611,8 @@ const autoBases=(rows,fam)=>{const rs=parseRelacionSiesa(rows);if(!rs.err)return
   let x=parseAuxBloques(rows);if(x.err)x=parseAnexoRetencion(rows);if(x.err){const y=parseImpuestosDetallados(rows,fam);if(!y.err)x=y;else if(y.informe)return y;}   // si es el informe de impuestos pero sin lo de esta declaración, se dice eso (y a dónde va)
   if(x.err){const y=parseInformeComprasRet(rows);if(!y.err)x=y;else if(y.informe)return y;}   // informe de compras con retenciones de SAP Business One (de retención en la fuente, IVA o ICA: se lee igual en retención en la fuente y en ReteICA)
   if(x.err){const mc=parseModuloCxp(rows);if(!mc.err)x=mc;}   // módulo de cuentas por pagar del software de salud (base real, fecha y factura)
-  if(x.err){const ac=parseAuxiliarCuentaBase(rows);if(!ac.err)x=ac;}   // auxiliar de una cuenta de retención con tercero (solo nombre), valor, porcentaje y base
+  if(x.err){const ac=parseAuxiliarCuentaBase(rows);if(!ac.err)x=ac;}
+  if(x.err){const pb=parseBasesPorCuentaPJPN(rows);if(!pb.err)x=pb;}   // auxiliar por bloques de cuenta con columnas PJ y PN: al final, para no quitarle archivos a los lectores de otros programas   // auxiliar de una cuenta de retención con tercero (solo nombre), valor, porcentaje y base
   if(x.err){const ib=parseInformeBasesBloques(rows);if(!ib.err)x=ib;}   // informe de bases por tarifa (no trae el NIT: se completa con el movimiento)
   if(x.err)x=parseReporteRetenciones(rows);if(x.err)x=parseLedger(rows);return x;};
 function leerBalance(rows,sw){const a=sw?adaptadorPor(sw):null;return a?conRespaldo(a,'balance','un balance',rows,parseBalance):parseBalance(rows);}
@@ -13515,7 +13537,7 @@ async function loadSlot(k,files,opc){
   if(k==='det'&&r.rows&&r.sinNitCompras){let cp=null;for(const hojas of porArchivo){for(const sh of hojas){const x=parseComprasPorDocumento(sh.rows);if(!x.err&&x.rows.length){cp=x;break;}}if(cp)break;}   // el auxiliar trae solo el nombre del tercero: el NIT sale del informe de compras del mismo libro
     if(cp){const c=completarNitConCompras(r.rows,cp.rows);r.rows=c.rows;r.nitDeCompras=c.unidos;r.sinNitCompras=c.sin>0;if(c.sin)r.avisos=(r.avisos||[]).concat(c.sin+(c.sin===1?' línea quedó':' líneas quedaron')+' sin NIT (su fecha y su base no coinciden con ninguna compra del informe): se tratarán por el nombre del tercero.');}
     else r.avisos=(r.avisos||[]).concat('Este auxiliar no trae el NIT del tercero y el libro no tiene la hoja «Informe Compras» para completarlo: carga también el informe de compras o el movimiento.');}
-  if(k==='det'&&r.rows&&/Informe de compras|libro auxiliar de la cuenta|reporte de bases gravadas/.test(r.formato||'')){const ica=r.rows.some(x=>/^2368/.test(x.cta)),otro=r.rows.some(x=>/^236[57]/.test(x.cta));   // el informe de SAP se lee en los dos flujos; si no trae lo que usa este, se dice
+  if(k==='det'&&r.rows&&/Informe de compras|libro auxiliar de la cuenta|reporte de bases gravadas|auxiliar de retenciones con base/.test(r.formato||'')){const ica=r.rows.some(x=>/^2368/.test(x.cta)),otro=r.rows.some(x=>/^236[57]/.test(x.cta));   // el informe de SAP se lee en los dos flujos; si no trae lo que usa este, se dice
     if(S.imp==='reteica'&&!ica)r.avisos=(r.avisos||[]).concat('Este informe no trae retención de ICA (cuentas 2368): para ReteICA hace falta el informe de compras de tipo «ICA».');
     else if(S.imp!=='reteica'&&ica&&!otro)r.avisos=(r.avisos||[]).concat('Este informe es de ICA (cuentas 2368): no trae retención en la fuente ni IVA; sirve para ReteICA.');}
   if(k==='det'&&r.fechasDeMovimiento)info2+=' · fecha de '+r.fechasDeMovimiento+(r.fechasDeMovimiento===1?' línea corregida':' líneas corregidas')+' con la hoja de movimiento del mismo libro (Excel había intercambiado el día y el mes)';
@@ -14393,7 +14415,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega79';
+const APP_ENTREGA='fase4b-entrega80';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
