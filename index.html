@@ -464,7 +464,7 @@ main .buscar .ic{color:var(--muted)}
 .brandlogo{display:block;margin:0 auto;width:150px;max-width:100%;height:auto}
 .brandbox{flex-direction:column;align-items:stretch}
 .brandbox .brandtxt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* el texto «Revisión de impuestos» queda para lectores de pantalla */
-@media (max-height:779px){.brandlogo{width:112px}.brandlogo-card{padding:6px 8px 4px;border-radius:12px}.rail{gap:8px}.brandbox{padding-bottom:8px}.nav-item{min-height:33px;padding-top:4px;padding-bottom:4px}}
+@media (max-height:779px){.brandlogo{width:112px}.brandlogo-card{padding:6px 8px 4px;border-radius:12px}.rail{gap:8px;padding-top:12px;padding-bottom:12px}.brandbox{padding-bottom:8px}.railacts{gap:4px}.nav-item{min-height:30px;padding-top:3px;padding-bottom:3px}}
 
 /* ---- cuentas de retención: traer las cuentas desde el balance del cliente ---- */
 .ctasbal{margin:12px 0 14px;padding:12px 14px;border:1px dashed var(--line,#c9d3e3);border-radius:12px}
@@ -570,6 +570,13 @@ table.pend tr.pend-ok{opacity:.78}
 .pend-vacio{text-align:center;padding:28px 14px;border:1px dashed color-mix(in srgb,var(--ok) 45%,transparent);border-radius:14px;background:var(--ok-bg)}
 .pend-vacio b{display:block;font-size:1.15rem;color:var(--ok);margin-bottom:4px}
 .pend-vacio p{margin:0 0 12px;color:var(--ink)}
+/* Espacio de informes */
+.inf-fila{display:grid;grid-template-columns:1.5fr .9fr 1.2fr 1fr 1fr 1.7fr;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #d9dde3}.inf-cab{font-weight:600;font-size:.85em;color:#555;border-bottom:2px solid #d9dde3}
+.inf-chk{display:flex;gap:6px;align-items:center;margin:0}.inf-decl{display:flex;flex-direction:column;gap:2px}.inf-decl small{display:block}.inf-ok{color:#1a7f37}.inf-mal{color:#a14b00}
+.inf-mini{max-height:70px;max-width:150px;border:1px solid #cfd4db;border-radius:4px}
+@media (max-width:900px){.inf-fila{grid-template-columns:1fr}.inf-cab{display:none}}
+/* Barra lateral: con el ítem «Informes» (cuatro ítems), espacios un poco más ajustados para que la barra no se desplace (pantallas altas aquí; las bajas, en la regla de max-height:779px) */
+@media (min-height:780px){.rail{gap:10px;padding-top:16px;padding-bottom:16px}.brandbox{padding-bottom:10px}.railacts{gap:6px}.nav-item{min-height:40px}}
 
 </style>
 </head>
@@ -1423,6 +1430,7 @@ function msg(codigo, vars) {
    23 · Informe de compras con retenciones (SAP Business One)
    24 · Informe al cliente (carta de revisión de impuestos)
    25 · Planilla de hallazgos para el informe
+   26 · Espacio de informes: valor de la declaración, planilla con imágenes y secciones
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -11943,11 +11951,15 @@ function unirInformesCompras(lista){
 /* Arma, con lo que la app ya sabe (cliente, vencimientos, períodos, documentos recibidos, hallazgos de las revisiones y valores por pagar), el contenido de la carta «Revisión de impuestos» que se entrega al cliente.
    Es solo contenido: construirDocx (export.js) lo pasa a Word, sin logos ni datos de ninguna firma. */
 const _MES_L=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],_MES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-function fechaLargaES(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));return m?(+m[3])+' de '+_MES_L[+m[2]-1]+' del '+m[1]:'';}   // «28 de septiembre del 2026»
+function fechaLargaES(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));return m?(+m[3])+' de '+_MES_L[+m[2]-1]+' de '+m[1]:'';}   // «28 de septiembre de 2026»
 function periodoCortoES(p){const s=String(p||'');let m=/^(\d{4})-(\d{2})$/.exec(s);if(m)return _MES_C[+m[2]-1]+' '+m[1];m=/^(\d{4})-B([1-6])$/.exec(s);if(m){const n=+m[2];return _MES_C[2*n-2]+' - '+_MES_C[2*n-1]+' '+m[1];}return /^\d{4}$/.test(s)?s:'N/A';}
 function nitConPuntos(nit){const p=partirNit(nit),b=p&&p.base?String(p.base):'';if(!b)return String(nit||'').trim();return b.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+(p.dv!=null&&p.dv!==''?'-'+p.dv:'');}
+function periodoLargoES(p){const s=String(p||''),C=x=>x.charAt(0).toUpperCase()+x.slice(1);let m=/^(\d{4})-(\d{2})$/.exec(s);if(m)return C(_MES_L[+m[2]-1])+' '+m[1];m=/^(\d{4})-B([1-6])$/.exec(s);if(m){const n=+m[2];return C(_MES_L[2*n-2])+' - '+C(_MES_L[2*n-1])+' '+m[1];}return /^\d{4}$/.test(s)?s:'N/A';}   // «Mayo 2026», «Mayo - Junio 2026»
+function nitInforme(nit){return 'NIT. '+nitConPuntos(nit).replace(/-(\d)$/,' – $1');}   // «NIT. 901.720.331 – 0»
 const ALCANCE_INFORME='La información suministrada en las declaraciones presentadas se cruza con los libros auxiliares, balance de comprobación del periodo, revisión de soportes digitales aleatorios suministrados por la administración bajo NIIF.';
-const SIN_HALLAZGOS_INFORME='Se efectúa la revisión del impuesto antes mencionado, el cual fue verificado con auxiliares y soportes aleatorios entregados por la administración.';
+const SIN_HALLAZGOS_INFORME='Se efectúa la revisión del impuesto antes mencionado, el cual fue verificado con auxiliares y soportes aleatorios escaneados entregados por la administración.';
+/* El párrafo de «Sin observaciones»; si la declaración la firma revisoría fiscal, se agrega la frase de la carta modelo */
+function textoSinObservaciones(revisoria){return SIN_HALLAZGOS_INFORME.replace(/\.$/,'')+(revisoria?', la declaración se encuentra firmada por revisoría fiscal':'')+'.';}
 /* Hallazgos de una lista de resultados: los que no cuadran (error) o merecen confirmación (advertencia); con una tabla corta de las filas más importantes */
 function hallazgosInforme(results,maxFilas){
   const mf=maxFilas||8;
@@ -11961,14 +11973,16 @@ function armarInforme(o){
   const t=v=>String(v==null?'':v).trim();
   return{
     fechaLinea:(t(o.ciudad)||'Bogotá D.C.')+', '+fechaLargaES(o.fecha),
-    razon:t(o.cliente&&o.cliente.razon).toUpperCase(),nit:'Nit. '+nitConPuntos(o.cliente&&o.cliente.nit),atn:t(o.atn)?'Atn. '+t(o.atn):'',
+    razon:t(o.cliente&&o.cliente.razon).toUpperCase(),nit:nitInforme(o.cliente&&o.cliente.nit),pie:t(o.pie),
+    atnLineas:(Array.isArray(o.atn)?o.atn:String(o.atn==null?'':o.atn).split(/\r?\n/)).map(t).filter(Boolean).map((a,i)=>i?a:'Atn. '+a),   // «Atn. Nombre – Cargo» y, debajo, las demás personas sin repetir «Atn.»
+    atn:(Array.isArray(o.atn)?o.atn:String(o.atn==null?'':o.atn).split(/\r?\n/)).map(t).filter(Boolean)[0]?'Atn. '+(Array.isArray(o.atn)?o.atn:String(o.atn==null?'':o.atn).split(/\r?\n/)).map(t).filter(Boolean)[0]:'',
     asunto:'Revisión de impuestos',
-    vencimientos:(o.vencimientos||[]).filter(v=>v&&v.fecha).map(v=>t(v.texto)+': '+fechaLargaES(v.fecha)),
+    vencimientos:(o.vencimientos||[]).filter(v=>v&&v.fecha).map(v=>t(v.texto)+' – '+fechaLargaES(v.fecha)),
     fechaRevision:fechaLargaES(o.fechaRevision),
     impuestos:(o.impuestos||[]).map(i=>({nombre:t(i.nombre),periodicidad:t(i.periodicidad)||'N/A',periodo:i.revisado?(t(i.periodo)||'N/A'):'N/A',revisado:!!i.revisado})),
     alcance:ALCANCE_INFORME,docsExcel:(o.docsExcel||[]).map(d=>({doc:t(d.doc),estado:t(d.estado)||'Pendiente'})),docsOtros:(o.docsOtros||[]).map(d=>({doc:t(d.doc),estado:t(d.estado)||'Pendiente'})),
-    secciones:(o.secciones||[]).filter(s=>s&&s.revisado).map((s,i)=>{const h=(s.hallazgos||[]).map(x=>({texto:t(x.texto),titulo:t(x.titulo),riesgo:t(x.riesgo),recomendacion:t(x.recomendacion),normatividad:t(x.normatividad),ref:t(x.ref),tabla:x.tabla||null,respuesta:t(x.respuesta)}));
-      return{numero:String(i+1),titulo:t(s.titulo),items:h.length?h:[{texto:SIN_HALLAZGOS_INFORME,tabla:null,respuesta:''}],conHallazgos:h.length>0};}),
+    secciones:(o.secciones||[]).filter(s=>s&&s.revisado).map((s,i)=>{const h=(s.hallazgos||[]).map(x=>({texto:t(x.texto),titulo:t(x.titulo),riesgo:t(x.riesgo),recomendacion:t(x.recomendacion),normatividad:t(x.normatividad),ref:t(x.ref),tabla:x.tabla||null,respuesta:t(x.respuesta),imgs:x.imgs||[]}));
+      return{numero:String(i+1),titulo:t(s.titulo),items:h.length?h:[{sinObs:true,texto:'',parrafo:t(s.textoSin)||SIN_HALLAZGOS_INFORME,tabla:null,respuesta:'',imgs:[]}],conHallazgos:h.length>0};}),
     porPagar:(o.porPagar||[]).filter(p=>p&&p.valor!=null&&p.valor!==''&&!isNaN(+p.valor)).map(p=>({concepto:t(p.concepto),texto:t(p.concepto)+' $ '+Math.round(+p.valor).toLocaleString('es-CO')}))};
 }
 
@@ -11986,7 +12000,7 @@ function parsePlanillaHallazgos(rows){
   for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[],desc=g(r,col.desc);if(desc.length<4)continue;
     const m=/^([^:]{8,300}?):\s+([\s\S]+)$/.exec(desc);let titulo='',texto=desc;
     if(m){const letras=m[1].replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g,''),may=letras.replace(/[^A-ZÁÉÍÓÚÜÑ]/g,'').length;if(letras.length>=8&&may/letras.length>=0.7){titulo=m[1].trim();texto=m[2].trim();}}   // «TÍTULO EN MAYÚSCULAS: explicación»
-    out.push({item:g(r,col.item).replace(/[-–.\s]+$/,''),titulo,texto,riesgo:g(r,col.riesgo),recomendacion:g(r,col.reco),normatividad:g(r,col.norma),comentarios:g(r,col.coment),ref:g(r,col.ref).replace(/[\s']*![A-Za-z$]+\d+$/,'').replace(/'/g,'').trim(),impuesto:g(r,col.imp)});}
+    out.push({fila:i,item:g(r,col.item).replace(/[-–.\s]+$/,''),titulo,texto,riesgo:g(r,col.riesgo),recomendacion:g(r,col.reco),normatividad:g(r,col.norma),comentarios:g(r,col.coment),ref:g(r,col.ref).replace(/[\s']*![A-Za-z$]+\d+$/,'').replace(/'/g,'').trim(),impuesto:g(r,col.imp)});}
   if(!out.length)return{err:'La planilla no trae hallazgos: ninguna fila tiene la descripción llena.'};
   return{rows:out};
 }
@@ -12001,6 +12015,49 @@ function cuadroTotalesInforme(o){
   rows.push(fila((ap67?'TOTAL cuentas 2365 + 2367':'TOTAL cuenta 2365')+' · valor total de la declaración (casilla 136)',val(a65)+(ap67?val(a67):0),formNet+ivTot+timbre));
   return{titulo:'Cuadro de totales: cuenta 2365'+(ap67?' y cuenta 2367':'')+' contra el valor total de la declaración',cols:['Concepto','Libros','Formulario','Diferencia'],pesos:[4,2,2,2],rows,total:rows.length};
 }
+
+/* ########## SECCIÓN 26 · Espacio de informes: valor de la declaración, planilla con imágenes y secciones ########## */
+/* Monto entero de un texto de formulario: «324,494,000», «324.494.000», «665000» o con centavos («1.234.567,00»). null si no es un monto. */
+function montoEntero(s){const t=String(s==null?'':s).trim();
+  if(/^\d+$/.test(t))return +t;
+  if(/^\d{1,3}(?:[.,]\d{3})+$/.test(t))return +t.replace(/[.,]/g,'');
+  if(/^\d{1,3}(?:\.\d{3})*,\d{1,2}$/.test(t))return Math.round(parseFloat(t.replace(/\./g,'').replace(',','.')));
+  if(/^\d{1,3}(?:,\d{3})*\.\d{1,2}$/.test(t))return Math.round(parseFloat(t.replace(/,/g,'')));
+  return null;}
+/* El valor a pagar de una declaración leída de un PDF con texto (líneas de pdf.js): retención en la fuente (formulario 350: casilla 138 «Total retenciones más sanciones»), retención de ICA (formulario 131: renglón 14 «Total a pagar», sigla TP)
+   o ICA (formulario único: renglón 38 «Total a pagar»). Devuelve {valor, casilla, etiqueta} o null (PDF escaneado, otro formulario o sin el renglón). */
+function valorDeDeclaracionTexto(lineas,imp){
+  const L=(lineas||[]).map(l=>String(l==null?'':l).replace(/\s+/g,' ').trim()).filter(Boolean);
+  const ultimo=(l)=>{const m=/(?:^|\s)(\d[\d.,]*)\s*$/.exec(l);return m?montoEntero(m[1]):null;};
+  const buscar=(rxEt,casilla)=>{for(let i=0;i<L.length;i++){if(!rxEt.test(L[i]))continue;
+      let v=ultimo(L[i].replace(rxEt,' ').replace(new RegExp('(?:^|\\s)'+casilla+'(?:\\.|\\s|$)'),' ').trim());
+      for(let k=1;v==null&&k<=2&&L[i+k];k++){if(/^[\d.,\s]+$/.test(L[i+k])||new RegExp('^'+casilla+'\\s+[\\d.,]+$').test(L[i+k]))v=ultimo(L[i+k].replace(new RegExp('^'+casilla+'\\s+'),''));}
+      if(v!=null)return v;}return null;};
+  if(imp==='retefuente'){const v=buscar(/Total retenciones m[aá]s sanciones/i,'138');return v==null?null:{valor:v,casilla:'138',etiqueta:'Total retenciones más sanciones'};}
+  if(imp==='reteica'){const r=parseForm131Texto(L);return r&&r.casillas&&r.casillas.TP!=null?{valor:r.casillas.TP,casilla:'TP',etiqueta:'Total a pagar (renglón 14)'}:null;}
+  if(imp==='ica'){const v=buscar(/TOTAL A PAGAR \(RENGL[ÓOÃ"“]*N 35 ?- ?36 ?\+ ?37\)|(?:^|\s)38 TOTAL A PAGAR\b/i,'38');return v==null?null:{valor:v,casilla:'38',etiqueta:'Total a pagar (renglón 38)'};}
+  return null;}
+/* Tamaño en píxeles de una imagen PNG o JPEG (para ponerla en el Word sin deformarla); null si no se reconoce. */
+function dimsImagen(b){if(!b||b.length<24)return null;
+  if(b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47)return{w:((b[16]<<24)|(b[17]<<16)|(b[18]<<8)|b[19])>>>0,h:((b[20]<<24)|(b[21]<<16)|(b[22]<<8)|b[23])>>>0,ext:'png'};
+  if(b[0]===0xFF&&b[1]===0xD8){let i=2;while(i+9<b.length){if(b[i]!==0xFF){i++;continue;}const m=b[i+1];if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC)return{h:(b[i+5]<<8)|b[i+6],w:(b[i+7]<<8)|b[i+8],ext:'jpeg'};i+=2+((b[i+2]<<8)|b[i+3]);}}
+  if(b[0]===1&&b[1]===0&&b[2]===0&&b[3]===0&&b[40]===0x20&&b[41]===0x45&&b[42]===0x4D&&b[43]===0x46){const v=new DataView(b.buffer,b.byteOffset,b.byteLength),w=Math.round((v.getInt32(32,true)-v.getInt32(24,true))/100*3.7795),h=Math.round((v.getInt32(36,true)-v.getInt32(28,true))/100*3.7795);return w>0&&h>0?{w,h,ext:'emf'}:null;}   // EMF (lo que genera Excel al pegar un rango como imagen): tamaño del marco en 0,01 mm
+  return null;}
+/* Las imágenes de la planilla (ancladas a una fila) van al hallazgo de esa fila: el último hallazgo cuya fila es menor o igual a la fila donde empieza la imagen (una imagen antes del primero va al primero). */
+function asignarImagenesAItems(items,imagenes){
+  const out=(items||[]).map(h=>Object.assign({},h,{imgs:[]}));if(!out.length)return out;
+  for(const im of [...(imagenes||[])].sort((a,b)=>a.fila-b.fila)){let k=0;for(let j=0;j<out.length;j++)if(out[j].fila!=null&&out[j].fila<=im.fila)k=j;out[k].imgs.push(im);}
+  return out;}
+/* Hallazgos de la planilla → sección del informe: por la columna «Impuesto» (la que coincide con el nombre de la sección); sin esa columna, o con un nombre que no coincide, van a la primera sección. */
+function destinoHallazgo(h,secciones){   // {k: sección a la que va, coincide: false si el «Impuesto» escrito no coincide con ninguna sección (va a la primera)}
+  const n=_plN,t=n(h&&h.impuesto);if(!(secciones||[]).length)return{k:-1,coincide:false};if(!t)return{k:0,coincide:true};
+  let k=secciones.findIndex(s=>n(s.titulo)===t||n(s.clave||'')===t);   // primero la coincidencia exacta; si no, la parcial («retención ica» en «Retención ICA Bogotá»)
+  if(k<0&&t.length>=3)k=secciones.findIndex(s=>{const a=n(s.titulo),b=n(s.clave||'');return(a&&(a.includes(t)||t.includes(a)))||(b&&(b.includes(t)||t.includes(b)));});
+  return k>=0?{k,coincide:true}:{k:0,coincide:false};}
+function repartirHallazgos(hallazgos,secciones){
+  const res=(secciones||[]).map(()=>[]);if(!res.length)return res;
+  for(const h of hallazgos||[])res[destinoHallazgo(h,secciones).k].push(h);
+  return res;}
 
 
 
@@ -12390,7 +12447,8 @@ const _XE=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 const _R=(t,o)=>{o=o||{};const pr=(o.font?`<w:rFonts w:ascii="${o.font}" w:hAnsi="${o.font}" w:eastAsia="${o.font}" w:cs="${o.font}"/>`:'')+(o.b?'<w:b/><w:bCs/>':'')+(o.i?'<w:i/><w:iCs/>':'')+(o.color?`<w:color w:val="${o.color}"/>`:'')+(o.sz?`<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>`:'');
   return`<w:r>${pr?`<w:rPr>${pr}</w:rPr>`:''}<w:t xml:space="preserve">${_XE(t)}</w:t></w:r>`;};
 const _TAB='<w:r><w:tab/></w:r>';
-const _P=(runs,o)=>{o=o||{};const pp=(o.keep?'<w:keepNext/>':'')+(o.num?`<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${o.num}"/></w:numPr>`:'')+(o.tabs?`<w:tabs>${o.tabs.map(t=>`<w:tab w:val="left" w:pos="${t}"/>`).join('')}</w:tabs>`:'')
+const _RMD=(t,o)=>String(t==null?'':t).split('**').map((seg,i)=>seg===''?'':_R(seg,Object.assign({},o,{b:(i%2===1)||!!(o&&o.b)}))).join('');   // lo que va entre **dobles asteriscos** sale en negrita
+const _P=(runs,o)=>{o=o||{};const pp=(o.keep?'<w:keepNext/>':'')+(o.salto?'<w:pageBreakBefore/>':'')+(o.num?`<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${o.num}"/></w:numPr>`:'')+(o.tabs?`<w:tabs>${o.tabs.map(t=>`<w:tab w:val="left" w:pos="${t}"/>`).join('')}</w:tabs>`:'')
   +(o.antes!=null||o.despues!=null?`<w:spacing${o.antes!=null?` w:before="${o.antes}"`:''}${o.despues!=null?` w:after="${o.despues}"`:''}/>`:'')+(o.izq!=null||o.colgante!=null?`<w:ind w:left="${o.izq||0}"${o.colgante!=null?` w:hanging="${o.colgante}"`:''}/>`:'')+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
   return`<w:p>${pp?`<w:pPr>${pp}</w:pPr>`:''}${Array.isArray(runs)?runs.join(''):runs}</w:p>`;};
 const _BORDE=(c,sz)=>['top','left','bottom','right','insideH','insideV'].map(l=>`<w:${l} w:val="single" w:sz="${sz||4}" w:space="0" w:color="${c}"/>`).join('');
@@ -12403,29 +12461,61 @@ function _TABLA(anchos,filas,o){o=o||{};const W=anchos.reduce((a,b)=>a+b,0);
 function _crc32(b){let c,t=_crc32.t;if(!t){t=_crc32.t=[];for(let n=0;n<256;n++){c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}}c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=t[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;}
 function zipSinComprimir(entradas){   // entradas: [{nombre,texto}] → Uint8Array de un ZIP válido (método «almacenado»)
   const te=new TextEncoder(),loc=[],cen=[];let pos=0;
-  for(const e of entradas){const n=te.encode(e.nombre),d=te.encode(e.texto),crc=_crc32(d);
+  for(const e of entradas){const n=te.encode(e.nombre),d=e.datos||te.encode(e.texto),crc=_crc32(d);   // «datos» = bytes (las imágenes); «texto» = XML
     const h=new Uint8Array(30+n.length),v=new DataView(h.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x0800,true);v.setUint16(10,0,true);v.setUint16(12,0x21,true);v.setUint32(14,crc,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,n.length,true);h.set(n,30);loc.push(h,d);
     const c=new Uint8Array(46+n.length),w=new DataView(c.buffer);w.setUint32(0,0x02014b50,true);w.setUint16(4,20,true);w.setUint16(6,20,true);w.setUint16(8,0x0800,true);w.setUint16(12,0,true);w.setUint16(14,0x21,true);w.setUint32(16,crc,true);w.setUint32(20,d.length,true);w.setUint32(24,d.length,true);w.setUint16(28,n.length,true);w.setUint32(42,pos,true);c.set(n,46);cen.push(c);pos+=h.length+d.length;}
   const cdLen=cen.reduce((s,a)=>s+a.length,0),fin=new Uint8Array(22),f=new DataView(fin.buffer);f.setUint32(0,0x06054b50,true);f.setUint16(8,entradas.length,true);f.setUint16(10,entradas.length,true);f.setUint32(12,cdLen,true);f.setUint32(16,pos,true);
   const partes=[...loc,...cen,fin],out=new Uint8Array(partes.reduce((s,a)=>s+a.length,0));let p=0;for(const a of partes){out.set(a,p);p+=a.length;}return out;}
+/* ---------- Planilla del informe: Excel con un espacio para la imagen (el «cuadro») de cada observación ---------- */
+const PLANILLA_INF_COLS=[['Impuesto',24],['Item',8],['Descripción',60],['Riesgo',26],['Recomendación',34],['Normatividad',26],['Comentarios del cliente',30],['Ref P/T',14],['Cuadro o imagen (pega aquí la imagen)',52]];
+function buildPlanillaInforme(ExcelJS,opt){
+  opt=opt||{};const FILAS=opt.filas||20,AZUL='FF5B9BD5',borde={top:{style:'thin',color:{argb:'FFBFBFBF'}},left:{style:'thin',color:{argb:'FFBFBFBF'}},bottom:{style:'thin',color:{argb:'FFBFBFBF'}},right:{style:'thin',color:{argb:'FFBFBFBF'}}};
+  const wb=new ExcelJS.Workbook();wb.creator='Revisión de impuestos';
+  const ws=wb.addWorksheet('Observaciones',{views:[{state:'frozen',ySplit:6}]});
+  ws.columns=PLANILLA_INF_COLS.map(c=>({width:c[1]}));
+  const n=PLANILLA_INF_COLS.length;
+  [['Planilla de observaciones del informe al cliente',{b:true,sz:14}],['Una fila por observación. Se organizan en el informe uno a uno, en el orden de la planilla, dentro de la sección de su impuesto (1.1, 1.2, …).',{}],['Escribe la observación en «Descripción» (lo que va entre **dobles asteriscos** sale en negrita). Si la observación lleva un cuadro, PEGA LA IMAGEN en la columna de la derecha, dentro de la misma fila.',{}],['Riesgo, Recomendación, Normatividad y Comentarios del cliente son opcionales: lo que dejes en blanco no sale en el informe.',{}]].forEach(([t,f],i)=>{ws.mergeCells(i+1,1,i+1,n);const c=ws.getCell(i+1,1);c.value=t;c.font={bold:!!f.b,size:f.sz||11,color:{argb:'FF404040'}};c.alignment={wrapText:true,vertical:'middle'};ws.getRow(i+1).height=i?30:22;});
+  const h=ws.getRow(6);PLANILLA_INF_COLS.forEach((c,j)=>{const ce=h.getCell(j+1);ce.value=c[0];ce.font={bold:true,color:{argb:'FFFFFFFF'}};ce.fill={type:'pattern',pattern:'solid',fgColor:{argb:AZUL}};ce.alignment={horizontal:'center',vertical:'middle',wrapText:true};ce.border=borde;});h.height=32;
+  for(let i=0;i<FILAS;i++){const r=ws.getRow(7+i);r.height=110;for(let j=1;j<=n;j++){const ce=r.getCell(j);ce.border=borde;ce.alignment={vertical:'top',wrapText:true,horizontal:j===2?'center':'left'};}
+    r.getCell(1).dataValidation={type:'list',allowBlank:true,formulae:['"'+(opt.impuestos||['Retención en la fuente','IVA','ICA','Retención ICA']).join(',')+'"']};}
+  const wi=wb.addWorksheet('Instrucciones');wi.columns=[{width:110}];
+  ['Cómo usar esta planilla','','1. En la hoja «Observaciones», una fila por observación: el impuesto (lista desplegable), el número de ítem (opcional) y la descripción.','2. Si la observación lleva un cuadro (por ejemplo, el comparativo Dian / Contabilidad / Diferencia), copia la imagen y pégala en la última columna, en la misma fila de la observación.','   La imagen puede ser una captura de pantalla (PNG o JPG) o un rango de Excel pegado como imagen. Ajusta la altura de la fila si la imagen es grande.','3. En el informe, el texto de «Descripción» puede llevar partes en negrita escribiéndolas entre dobles asteriscos: **$54.345**.','4. Guarda el archivo (.xlsx) y cárgalo en «Informes», en el paso «Con observaciones».','','Las filas sin descripción se ignoran. Una imagen se asigna a la observación de su fila (o a la anterior más cercana si queda debajo).'].forEach((t,i)=>{const c=wi.getCell(i+1,1);c.value=t;c.font={bold:i===0,size:i===0?14:11};c.alignment={wrapText:true,vertical:'top'};});
+  return wb;}
+/* Lee la planilla (Excel con imágenes): las observaciones de la hoja que trae «Descripción» y «Riesgo» o «Recomendación», cada una con las imágenes de su fila.
+   Devuelve {rows, imagenes, omitidas} (omitidas: formatos que Word no admite) o {err}. */
+async function leerPlanillaConImagenes(ExcelJS,buffer){
+  const wb=new ExcelJS.Workbook();await wb.xlsx.load(buffer);
+  const txt=v=>{if(v==null)return'';if(typeof v==='object'){if(v.richText)return v.richText.map(t=>t.text).join('');if(v.result!=null)return String(v.result);if(v.text!=null)return String(v.text);if(v instanceof Date)return v.toISOString().slice(0,10);return'';}return String(v);};
+  let ult=null;
+  for(const ws of wb.worksheets){const rows=[];ws.eachRow({includeEmpty:true},(row,n)=>{const a=[];row.eachCell({includeEmpty:true},(c,j)=>{a[j-1]=txt(c.value);});rows[n-1]=a;});for(let i=0;i<rows.length;i++)if(!rows[i])rows[i]=[];
+    const r=parsePlanillaHallazgos(rows);if(r.err){if(!ult||/^No reconocí/.test(ult.err))ult=r;continue;}   // el error de la hoja que sí trae las columnas (sin observaciones) gana al de las hojas que no son la planilla
+    const ims=[];for(const im of ws.getImages()){const med=wb.getImage(im.imageId);if(!med||!med.buffer)continue;const tl=im.range&&im.range.tl,ext=String(med.extension||'png').toLowerCase().replace('jpg','jpeg');ims.push({fila:tl?(tl.nativeRow!=null?tl.nativeRow:Math.floor(tl.row)):0,ext,buf:new Uint8Array(med.buffer)});}
+    const ok=ims.filter(i=>i.ext==='png'||i.ext==='jpeg'||i.ext==='emf');
+    return{rows:asignarImagenesAItems(r.rows,ok),imagenes:ok.length,omitidas:ims.length-ok.length};}
+  return ult||{err:'No encontré hojas con observaciones en el archivo.'};}
 function construirDocx(inf){
-  const AZUL='5B9BD5',ANCHO=8838,cuerpo=[];
+  const AZUL='5B9BD5',ANCHO=8838,cuerpo=[],medios=[];
+  /* Imagen en línea (los cuadros de cada observación): se ajusta al ancho de la página sin deformarla y sin agrandarla */
+  const _IMG=(im)=>{const d=dimsImagen(im.buf)||{w:im.w||400,h:im.h||200,ext:im.ext},ext=(im.ext||d.ext||'png').toLowerCase().replace('jpg','jpeg'),w=im.w||d.w||400,h=im.h||d.h||200,k=Math.min(1,4900000/(w*9525),3300000/(h*9525)),cx=Math.round(w*9525*k),cy=Math.round(h*9525*k),n=medios.length+1;medios.push({n,ext,buf:im.buf});
+    return`<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Cuadro ${n}" descr="Cuadro ${n}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${n}" name="imagen${n}.${ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg${n}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;};
   const eti=(t)=>_P(_R(t,{b:true}),{keep:true,antes:120});
   cuerpo.push(_P(_R(inf.fechaLinea),{jc:'right',despues:240}));
-  cuerpo.push(_P(_R('Señores:'),{despues:0}),_P(_R(inf.razon,{b:true}),{despues:0}),_P(_R(inf.nit,{b:true}),{despues:0}));if(inf.atn)cuerpo.push(_P(_R(inf.atn),{despues:0}));
+  cuerpo.push(_P(_R('Señores:'),{despues:0}),_P(_R(inf.razon,{b:true}),{despues:0}),_P(_R(inf.nit,{b:true}),{despues:0}));{const atnL=inf.atnLineas&&inf.atnLineas.length?inf.atnLineas:(inf.atn?[inf.atn]:[]);atnL.forEach((a,i)=>cuerpo.push(_P(_R(a),{despues:0,izq:i?567:undefined})));}   // las demás personas, debajo y sin repetir «Atn.»
   cuerpo.push(_P('',{despues:120}),_P(_R('Asunto: '+inf.asunto,{b:true}),{jc:'right',despues:240}));
-  if(inf.vencimientos.length){cuerpo.push(eti('Vencimientos Impuestos:'));inf.vencimientos.forEach((v,i)=>cuerpo.push(_P(_R(v),{despues:i===inf.vencimientos.length-1?160:0})));}
-  if(inf.fechaRevision)cuerpo.push(_P([_R('Fecha de revisión: ',{b:true}),_R(inf.fechaRevision)],{antes:120}));
+  if(inf.vencimientos.length)inf.vencimientos.forEach((v,i)=>cuerpo.push(_P(_R((i===0?'Vencimientos: ':'')+v),{despues:0,izq:i?1560:undefined})));   // como la carta modelo: «Vencimientos: Retención en la fuente – 10 de junio de 2026»
+  if(inf.fechaRevision)cuerpo.push(_P(_R('Revisión: '+inf.fechaRevision),{despues:160}));
   if(inf.impuestos.length){const filas=[['','Impuesto','Periodicidad','Periodo de Revisión'].map((t,i)=>i?t:'')].concat(inf.impuestos.map((i,k)=>[{t:i.revisado?'☒':'☐',font:'Segoe UI Symbol',jc:'center'},{t:(k+1)+'.  '+i.nombre,jc:'left'},{t:i.periodicidad,jc:'center'},{t:i.periodo,jc:'center'}]));
     cuerpo.push(_TABLA([520,3400,2300,2618],filas,{encabezado:true,relleno:AZUL,borde:AZUL}));cuerpo.push(_P('',{despues:60}));}
   cuerpo.push(_P(_R(inf.alcance),{jc:'both',antes:120}));
   const docs=(titulo,l)=>{if(!l.length)return;cuerpo.push(eti(titulo));cuerpo.push(_TABLA([6300,2538],l.map(d=>[d.doc,{t:d.estado,b:true}]),{}));cuerpo.push(_P('',{despues:60}));};
   docs('Documentos requeridos en Excel:',inf.docsExcel);docs('Otros Documentos requeridos:',inf.docsOtros);
   for(const s of inf.secciones){
-    cuerpo.push(_P([_R(s.numero+'.',{b:true}),_TAB,_R(s.titulo,{b:true})],{keep:true,antes:240,despues:120,tabs:[567],izq:567,colgante:567}));
+    cuerpo.push(_P([_R(s.numero+'.',{b:true}),_TAB,_R(s.titulo,{b:true})],{keep:true,salto:s===inf.secciones[0],antes:240,despues:120,tabs:[567],izq:567,colgante:567}));   // las observaciones empiezan en una página nueva, como en la carta modelo
     s.items.forEach((it,k)=>{
-      cuerpo.push(_P([_R(s.numero+'.'+(k+1),{b:true}),_TAB].concat(it.titulo?[_R(it.titulo+': ',{b:true})]:[],[_R(it.texto)]),{antes:60,despues:it.riesgo||it.recomendacion||it.normatividad?60:120,tabs:[709],izq:709,colgante:709,jc:'both'}));
+      if(it.sinObs){cuerpo.push(_P([_R(s.numero+'.'+(k+1)),_TAB,_R('Sin observaciones.')],{antes:60,despues:120,tabs:[709],izq:709,colgante:709}));if(it.parrafo)cuerpo.push(_P(_RMD(it.parrafo),{despues:120,jc:'both'}));return;}   // «1.1 Sin observaciones.» y el párrafo de la revisión
+      cuerpo.push(_P([_R(s.numero+'.'+(k+1),{b:true}),_TAB].concat(it.titulo?[_R(it.titulo+': ',{b:true})]:[],[_RMD(it.texto)]),{antes:60,despues:it.riesgo||it.recomendacion||it.normatividad?60:120,tabs:[709],izq:709,colgante:709,jc:'both'}));
       [['Riesgo',it.riesgo],['Recomendación',it.recomendacion],['Normatividad',it.normatividad]].forEach(([et,v])=>{if(v)cuerpo.push(_P([_R(et+': ',{b:true}),_R(v)],{despues:60,izq:709,jc:'both'}));});
+      (it.imgs||[]).forEach(im=>cuerpo.push(_P(_IMG(im),{antes:60,despues:120,izq:709})));   // el cuadro de la observación (imagen de la planilla)
       if(it.tabla&&it.tabla.titulo)cuerpo.push(_P(_R(it.tabla.titulo,{b:true,sz:20}),{keep:true,antes:120,despues:60,izq:709}));
       if(it.tabla){const n=it.tabla.cols.length,rest=ANCHO,pw=it.tabla.pesos&&it.tabla.pesos.length===n?it.tabla.pesos:null,tw=pw?pw.reduce((a,b)=>a+b,0):n,anchos=it.tabla.cols.map((c,i)=>i===0?0:Math.floor(rest*(pw?pw[i]:1)/tw));anchos[0]=rest-anchos.slice(1).reduce((a,b)=>a+b,0);
         cuerpo.push(_TABLA(anchos,[it.tabla.cols].concat(it.tabla.rows),{encabezado:true,relleno:'D9E2F3',colorEnc:'1F3864',borde:'8EAADB',sz:18,centrada:true,jc:it.tabla.cols.map((c,i)=>it.tabla.rows.length&&it.tabla.rows.every(f=>f[i]===''||/^-?\$?\s?-?[\d.,]+\s*%?$/.test(String(f[i])))?'right':'left')}));
@@ -12433,15 +12523,16 @@ function construirDocx(inf){
       if(it.respuesta)cuerpo.push(_P([_R('La administración informa: ',{b:true}),_R('“'+it.respuesta+'”')],{despues:it.ref?60:120,jc:'both',izq:709}));
       if(it.ref)cuerpo.push(_P([_R('Ref. P/T: ',{b:true,i:true,sz:20,color:'595959'}),_R(it.ref,{i:true,sz:20,color:'595959'})],{despues:120,izq:709}));});}
   if(inf.porPagar.length){cuerpo.push(_P(_R('Valor por pagar:',{b:true}),{keep:true,antes:240,despues:120}));inf.porPagar.forEach(p=>cuerpo.push(_P(_R(p.texto,{b:true}),{num:1,despues:120})));}
-  const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',cab='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
-  const documento=`${cab}<w:document ${NS}><w:body>${cuerpo.join('')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/></w:sectPr></w:body></w:document>`;
+  const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"',cab='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const documento=`${cab}<w:document ${NS}><w:body>${cuerpo.join('')}<w:sectPr>${inf.pie?'<w:footerReference w:type="default" r:id="rIdPie"/>':''}<w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/></w:sectPr></w:body></w:document>`;
   const estilos=`${cab}<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="es-CO" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
   const numeracion=`${cab}<w:numbering ${NS}><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="✓"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol" w:cs="Segoe UI Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`;
-  const tipos=`${cab}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
+  const tipos=`${cab}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${medios.some(m=>m.ext==='png')?'<Default Extension="png" ContentType="image/png"/>':''}${medios.some(m=>m.ext==='jpeg')?'<Default Extension="jpeg" ContentType="image/jpeg"/>':''}${medios.some(m=>m.ext==='emf')?'<Default Extension="emf" ContentType="image/x-emf"/>':''}${inf.pie?'<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>':''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
   const rels=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
-  const relsDoc=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/></Relationships>`;
+  const relsDoc=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>${medios.map(m=>`<Relationship Id="rIdImg${m.n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/imagen${m.n}.${m.ext}"/>`).join('')}${inf.pie?'<Relationship Id="rIdPie" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>':''}</Relationships>`;
+  const pie=inf.pie?`${cab}<w:ftr ${NS}>${String(inf.pie).split(/\r?\n/).map(l=>_P(_R(l,{color:'2F5496',sz:20}),{jc:'center',despues:0})).join('')}</w:ftr>`:'';
   const nucleo=`${cab}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${_XE(inf.asunto)} · ${_XE(inf.razon)}</dc:title></cp:coreProperties>`;
-  return zipSinComprimir([{nombre:'[Content_Types].xml',texto:tipos},{nombre:'_rels/.rels',texto:rels},{nombre:'word/document.xml',texto:documento},{nombre:'word/_rels/document.xml.rels',texto:relsDoc},{nombre:'word/styles.xml',texto:estilos},{nombre:'word/numbering.xml',texto:numeracion},{nombre:'docProps/core.xml',texto:nucleo}]);
+  return zipSinComprimir([{nombre:'[Content_Types].xml',texto:tipos},{nombre:'_rels/.rels',texto:rels},{nombre:'word/document.xml',texto:documento},{nombre:'word/_rels/document.xml.rels',texto:relsDoc},{nombre:'word/styles.xml',texto:estilos},{nombre:'word/numbering.xml',texto:numeracion},{nombre:'docProps/core.xml',texto:nucleo}].concat(inf.pie?[{nombre:'word/footer1.xml',texto:pie}]:[],medios.map(m=>({nombre:'word/media/imagen'+m.n+'.'+m.ext,datos:m.buf}))));
 }
 /* ---------- Balance ---------- */
 function balanceRows(d){
@@ -13218,7 +13309,7 @@ const LOGO_TRIBUTEK='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAADJCAMAA
 const ICA_DEF={icaTarifa:'9.66',icaTarifaAnterior:'',icaActividad:'',icaAvisos:'Sí',icaTarifaAuto:'Sí',icaExcl:'42',icaExent:'',icaDescBruto:'42',icaDevol:'4175',icaDevolDocs:'NC',icaExport:'',icaActivos:'',icaCtaRet:'13551801',icaCtaPagar:'2412',icaFuera:''};
 /* Programas contables del selector del perfil: «Detectar automáticamente» y los adaptadores (los que aún no tienen lector se marcan) */
 const SOFTWARE_OPTS=[{v:'',t:'Detectar automáticamente'}].concat(ADAPTADORES.map(a=>({v:a.id,t:a.nombre+(a.estado==='esqueleto'?' (aún sin lector)':'')})));
-function newClient(){return{...ICA_DEF,id:'c'+Date.now().toString(36),razon:'',nit:'',socio:'',encargado:'',auditor:'',tipo:'Persona jurídica',iva:'',periodicidad:'Bimestral',software:'',
+function newClient(){return{...ICA_DEF,id:'c'+Date.now().toString(36),razon:'',nit:'',socio:'',encargado:'',auditor:'',atencion:[],tipo:'Persona jurídica',iva:'',periodicidad:'Bimestral',software:'',
   granContrib:'No',municipio:'Bogotá D.C.',icaRegimen:'No',agenteReteICA:'No',ctaPagoRica:'236899',uvtEspecial:0,tol:1000,ctaPago:'236575',gasto:'51,52,61,62,71,72,73,28',gastoExcl:'5105,5115,5160',omitUvt:10,omitModo:'Tabla 2026 por concepto',exentos:'',tarifaEsp:'',tipoPersona:'',fijos:'',notas:'',rules:clone(DEFAULT_RULES),periods:{},_new:true};}
 function pkeyAct(){return S.imp==='retefuente'?S.period:S.imp+':'+(S.per[S.imp]||'sin-periodo');}
 function pdata(){const c=cur();const k=pkeyAct();return c.periods[k]=c.periods[k]||{meta:{visita:'',corte:'',prevDecl:''},ck:{},summary:null,ranAt:null};}
@@ -13242,7 +13333,7 @@ async function persist(c){
   if(S.db){try{const o=clone(c);delete o._new;await S.db.doc('clients/'+c.id).set(o);}catch(e){toast('No pude guardar en el espacio compartido; quedó en este navegador.');}}
 }
 let tmr=null;function persistSoon(){clearTimeout(tmr);tmr=setTimeout(()=>{const c=cur();if(c)persist(c);},600);}
-function migrate(c){if(c.software==null)c.software='';else if(c.software&&!adaptadorPor(c.software)){const id=softwareDesdeTexto(c.software);if(id)c.software=id;else{c.softwareTxt=c.software;c.software='';}}   // el texto libre de versiones anteriores pasa a un programa de la lista (o se conserva aparte)
+function migrate(c){if(!Array.isArray(c.atencion))c.atencion=[];if(c.software==null)c.software='';else if(c.software&&!adaptadorPor(c.software)){const id=softwareDesdeTexto(c.software);if(id)c.software=id;else{c.softwareTxt=c.software;c.software='';}}   // el texto libre de versiones anteriores pasa a un programa de la lista (o se conserva aparte)
   for(const [k,v] of Object.entries(ICA_DEF))if(c[k]==null)c[k]=v;if(!c.rules)return;if(c.municipio==null)c.municipio='Bogotá D.C.';if(c.icaRegimen==null)c.icaRegimen='No';if(c.agenteReteICA==null)c.agenteReteICA='No';if(c.ctaPagoRica==null)c.ctaPagoRica='236899';if(!['Bimestral','Cuatrimestral','No presenta'].includes(c.periodicidad))c.periodicidad='Bimestral';if(c.granContrib==null)c.granContrib='No';if(c.uvtEspecial==null)c.uvtEspecial=(c.uvt&&+c.uvt!==52374)?+c.uvt:0;   // la UVT ya no se guarda por cliente: una UVT distinta a la oficial pasa a «especial»
   const conBal=!!(c.ctasBalance&&c.ctasBalance.ctas&&c.ctasBalance.ctas.length);   // con un balance cargado, las filas que no aparecen en él se quitaron a propósito: no se reponen
   if(!conBal)[['236703','IVA 132'],['236704','IVA 131']].forEach(([p,k])=>{if(!c.rules.some(r=>String(r.p)===p))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='2367')),0,{p,c:k,m:0});});c.rules.forEach(r=>{if(r.c==='RTE IVA')r.c='IVA 131';if(r.c==='EXTERIOR')r.c='EXTERIOR SIN CONVENIO';});if(c.tarifaEsp==null)c.tarifaEsp='';if(c.tipoPersona==null)c.tipoPersona='';if(!conBal&&!c.rules.some(r=>String(r.p)==='23653001'))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='236530')),0,{p:'23653001',c:'ARRENDAMIENTOS',m:0});}
@@ -13807,8 +13898,9 @@ function render(){
   const buscador=total>=2?`<div class=\"buscar\">${ICO.search}<input type=\"search\" id=\"filtro\" data-c=\"filtro\" placeholder=\"Buscar cliente o NIT\" value=\"${esc(S.filtro)}\" aria-label=\"Buscar cliente por nombre o NIT\" autocomplete=\"off\"></div>`:'';
   const bloqueRail=buscador+`<div id=\"railbody\"${qf?'':' class=\"centrado\"'}>${railBodyUno(list,qf)}</div>`;
   rail.innerHTML=`<div class="brandbox"><div class="brandlogo-card"><img class="brandlogo" src="${LOGO_TRIBUTEK}" width="150" height="100" alt="Tributek · Revisión de impuestos" title="Retención, IVA, ICA y ReteICA"></div><div class="brandtxt"><h1>Revisión de impuestos</h1><p class="brand">${cuentaFirma()?esc(cuentaFirma().nombre)+' · '+esc(ROL_TXT[cuentaFirma().rol]||cuentaFirma().rol):'Retención, IVA, ICA y ReteICA'}</p></div></div>
-  <div class="railacts"><button class="nav-item" data-a="home" ${inicio&&S.view!=='pend'&&S.view!=='norma'?'aria-current="true"':''}>${ICO.grid}<span>Inicio · todos los clientes</span></button>
+  <div class="railacts"><button class="nav-item" data-a="home" ${inicio&&S.view!=='pend'&&S.view!=='norma'&&S.view!=='informes'?'aria-current="true"':''}>${ICO.grid}<span>Inicio · todos los clientes</span></button>
   <button class="nav-item" data-a="pend" ${S.view==='pend'?'aria-current="true"':''}>${ICO.cal}<span>Pendientes del mes</span>${pn?`<span class="badge" title="${pn} por revisar este mes" aria-label="${pn} pendientes por revisar este mes">${pn}</span>`:''}</button>
+  <button class="nav-item" data-a="informes" ${S.view==='informes'?'aria-current="true"':''}>${ICO.doc}<span>Informes</span></button>
   <button class="nav-item" data-a="norma" ${S.view==='norma'?'aria-current="true"':''}>${ICO.doc}<span>Normatividad utilizada</span></button>
   <button class="btn rail-btn primary" data-a="new" ${cuentaFirma()&&cuentaFirma().rol==='lectura'?'disabled title="Tu rol es de solo lectura"':''}>${ICO.plus}Nuevo cliente</button></div>
   ${bloqueRail}
@@ -13824,6 +13916,7 @@ function render(){
 </div>
   <p class=\"credito\">Desarrollado por: Karol Tatiana Lesmes</p>`;
   if(S.view==='firma'&&cuentaFirma()){main.innerHTML=viewFirma();return;}
+  if(S.view==='informes'){main.innerHTML=bannerRespaldo()+viewInformes();enlazarInformes();return;}
   if(S.view==='norma'){main.innerHTML=bannerRespaldo()+viewNorma();return;}
   if(S.view==='pend'){main.innerHTML=bannerRespaldo()+viewPend();return;}
   const c=cur();
@@ -13865,7 +13958,7 @@ function panelCierre(c){
   return `<div class="panel cierre"><div><h3>${esc(e.t)}</h3><p class="hint">${esc(mt('CIE-PAS-001'))}</p></div><button class="btn" data-a="cerrarrev">Marcar como revisado</button></div>`;
 }
 function nGuardados(){return S.clients.filter(c=>!c._new).length;}
-function enInicio(){return S.view==='home'||(!cur()&&S.view!=='pend'&&S.view!=='norma');}
+function enInicio(){return S.view==='home'||(!cur()&&S.view!=='pend'&&S.view!=='norma'&&S.view!=='informes');}
 function estadoCorto(e){return e.manual?'Cerrada':e.k==='ok'?'Completa':e.k==='warn'?((e.t.match(/\((\d+\/\d+)\)/)||[])[1]||'En revisión'):'Sin iniciar';}
 function mesTablero(mes){return MESES_ES[+mes.slice(5,7)-1]+' de '+mes.slice(0,4);}
 function sumarMes(mes,d){const y=+mes.slice(0,4),m=+mes.slice(5,7)-1+d;const f=new Date(y,m,1);return f.getFullYear()+'-'+String(f.getMonth()+1).padStart(2,'0');}
@@ -14461,7 +14554,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega81';
+const APP_ENTREGA='fase4b-entrega83';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -14610,6 +14703,112 @@ function abrirInforme(){
     catch(e){console.error(e);toast('No pude generar el informe en Word.');}});
   setTimeout(()=>{const f=ov.querySelector('#inf_atn');if(f)f.focus();},0);
 }
+/* ########## Espacio de informes (Word): sin observaciones, o con la planilla de observaciones y sus cuadros ########## */
+const INF_PIE_LS='tributek_pie';
+const INF_DOCS_EXCEL=[['Auxiliar de la cuenta correspondiente','Ok'],['Balance de prueba sin terceros','Ok'],['Movimiento general del mes','Ok'],['Depuración rentas de trabajo','N/A'],['Anexos explicativos','Ok']];
+const INF_DOCS_OTROS=[['Borrador de la declaración diligenciado en el portal','Ok'],['Acceso a los consecutivos de documento soporte (egresos, recibos de caja, causaciones, notas, etc.)','Soportes digitales suministrados por correo electrónico.']];
+/* El período por defecto de cada impuesto: el mes anterior (retención en la fuente), el bimestre anterior (ReteICA e ICA bimestral) o el año anterior (ICA anual) */
+function infPeriodoPrev(k,periodicidad){const d=new Date(),y=d.getFullYear(),m=d.getMonth()+1;
+  if(k==='retefuente')return(m===1?y-1:y)+'-'+String(m===1?12:m-1).padStart(2,'0');
+  if(k==='ica'&&/anual/i.test(periodicidad||''))return String(y-1);
+  let b=Math.floor((m-1)/2),yy=y;if(b===0){b=6;yy=y-1;}return yy+'-B'+b;}
+function infOpcionesPeriodo(k,periodicidad,sel){const d=new Date(),y=d.getFullYear(),m=d.getMonth()+1,out=[];
+  if(k==='retefuente'){for(let i=0;i<14;i++){let mm=m-i,yy=y;while(mm<1){mm+=12;yy--;}out.push(yy+'-'+String(mm).padStart(2,'0'));}}
+  else if(k==='ica'&&/anual/i.test(periodicidad||'')){for(let i=0;i<4;i++)out.push(String(y-i));}
+  else{let b=Math.floor((m-1)/2)+1,yy=y;for(let i=0;i<9;i++){out.push(yy+'-B'+b);b--;if(b<1){b=6;yy--;}}}
+  if(sel&&!out.includes(sel))out.unshift(sel);return out;}
+function infInicial(c){
+  const mun=String(c.municipio||'Bogotá D.C.').replace(/\s*D\.C\.?$/,'');let atn='',pie='';
+  try{atn=localStorage.getItem('tributek_atn:'+(c.nit||c.id))||'';pie=localStorage.getItem(INF_PIE_LS)||'';}catch(e){}
+  if(!Array.isArray(c.atencion))c.atencion=[];
+  if(!c.atencion.length&&atn.trim()){c.atencion=atn.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map(s=>{const m=/^(.*?)\s+[–-]\s+(.+)$/.exec(s);return m?{nombre:m[1].trim(),cargo:m[2].trim()}:{nombre:s,cargo:''};});persistSoon();}   // lo escrito en versiones anteriores pasa al perfil del cliente
+  let obs=[];try{obs=obligacionesCliente(c,allCals());}catch(e){}
+  const mk=(k,nombre,titulo,periodicidad,imp)=>{const periodo=imp?infPeriodoPrev(k,periodicidad):'';return{k,nombre,titulo,periodicidad,periodo,periodoTxt:'',revisado:k==='retefuente',valor:'',venc:imp?((obs.find(o=>o.imp===imp&&o.id===periodo))||{}).fecha||'':'',decl:null};};
+  return{cid:c.id,fecha:hoyISO(),fechaRev:hoyISO(),pie,modo:'sin',revisoria:false,textoSin:textoSinObservaciones(false),textoEditado:false,
+    imps:[mk('retefuente','Retención en la Fuente','Retención en la fuente','Mensual','retefuente'),mk('iva','IVA','IVA',c.iva==='Sí'?(c.periodicidad||'N/A'):'N/A',null),mk('ica','ICA','ICA',c.icaRegimen||'N/A','ica'),mk('reteica','Retención ICA '+mun,'Retención de ICA',c.agenteReteICA==='Sí'?'Bimestral':'N/A','reteica')],
+    docsExcel:INF_DOCS_EXCEL.map(([doc,estado])=>({doc,estado})),docsOtros:INF_DOCS_OTROS.map(([doc,estado])=>({doc,estado})),plan:null};}
+function infSet(path,val){const I=S.inf;if(!I)return;const p=path.split('.');let o=I;for(let i=0;i<p.length-1;i++)o=o[p[i]];o[p[p.length-1]]=val;
+  if(path==='revisoria'&&!I.textoEditado)I.textoSin=textoSinObservaciones(!!val);if(path==='textoSin')I.textoEditado=true;}
+function infRender(){const y=window.scrollY;render();try{window.scrollTo(0,y);}catch(e){}}
+function viewInformes(){
+  const c=cur();if(!c)return`<div class="empty"><h2>Informes</h2><p>Abre un cliente desde «Inicio» para preparar su informe: los datos del cliente salen de su perfil.</p></div>`;
+  if(!S.inf||S.inf.cid!==c.id)S.inf=infInicial(c);const I=S.inf,fila=(i,im)=>{
+    const per=im.k==='iva'?`<input type="text" aria-label="Período del IVA" data-inf="imps.${i}.periodoTxt" value="${esc(im.periodoTxt)}" placeholder="Ej.: Enero - Abril 2026">`:`<select aria-label="Período de ${esc(im.nombre)}" data-inf="imps.${i}.periodo" data-rr="1">${infOpcionesPeriodo(im.k,im.periodicidad,im.periodo).map(p=>`<option value="${esc(p)}" ${p===im.periodo?'selected':''}>${esc(periodoLargoES(p))}</option>`).join('')}</select>`;
+    const aceptaXls=im.k==='reteica',decl=im.k==='iva'?'<small class="hint">El valor del IVA se escribe a mano.</small>':`<input type="file" aria-label="Declaración de ${esc(im.nombre)}" data-idecl="${i}" accept=".pdf${aceptaXls?',.xlsx,.xlsm,.xls':''}">${im.decl?`<small class="${im.decl.ok?'inf-ok':'inf-mal'}">${esc(im.decl.msg)}</small>`:'<small class="hint">PDF de la declaración (con texto): se lee el valor a pagar.</small>'}`;
+    return`<div class="inf-fila"><label class="inf-chk"><input type="checkbox" data-inf="imps.${i}.revisado" ${im.revisado?'checked':''} data-rr="1" aria-label="${esc(im.nombre)} revisado"> <b>${esc(im.nombre)}</b></label>
+      <input type="text" aria-label="Periodicidad de ${esc(im.nombre)}" data-inf="imps.${i}.periodicidad" value="${esc(im.periodicidad)}">${per}
+      <input type="date" aria-label="Vencimiento de ${esc(im.nombre)}" data-inf="imps.${i}.venc" value="${esc(im.venc)}">
+      <input type="text" inputmode="numeric" aria-label="Valor por pagar de ${esc(im.nombre)}" data-inf="imps.${i}.valor" value="${esc(im.valor)}" placeholder="Valor por pagar">
+      <div class="inf-decl">${decl}</div></div>`;};
+  const docs=(t,k,l)=>`<h4 style="margin:12px 0 4px">${t}</h4>${l.map((d,j)=>`<div class="row" style="gap:8px;margin:2px 0"><span style="flex:3">${esc(d.doc)}</span><input style="flex:2" type="text" aria-label="Estado: ${esc(d.doc)}" data-inf="${k}.${j}.estado" value="${esc(d.estado)}"></div>`).join('')}`;
+  const secsRev=I.imps.filter(i=>i.revisado).map(i=>({titulo:String(i.titulo||i.nombre).trim(),clave:i.nombre})),destino=h=>{if(!secsRev.length)return'';const d=destinoHallazgo(h,secsRev);return d.coincide?`<small class="hint" style="display:block;margin:2px 0 0 24px">Va en «${esc(secsRev[d.k].titulo)}»</small>`:`<small class="inf-mal" style="display:block;margin:2px 0 0 24px">Su impuesto («${esc(h.impuesto)}») no coincide con ninguno de los marcados: irá a «${esc(secsRev[0].titulo)}». Desmárcala o corrige el nombre en la planilla.</small>`;};
+  const P=I.plan,obsHtml=I.modo==='sin'?`<p class="hint" style="margin:4px 0">Cada impuesto marcado sale con «Sin observaciones» y este párrafo (puedes editarlo):</p>
+      <textarea rows="3" style="width:100%" aria-label="Párrafo de la revisión sin observaciones" data-inf="textoSin">${esc(I.textoSin)}</textarea>
+      <label style="font-weight:400;display:block;margin:6px 0"><input type="checkbox" data-inf="revisoria" data-rr="1" ${I.revisoria?'checked':''}> La declaración se encuentra firmada por revisoría fiscal</label>`
+    :`<p class="hint" style="margin:4px 0">Carga la planilla con las observaciones (una fila por observación; si lleva un cuadro, la imagen va pegada en su fila). Se organizan uno a uno en la sección de su impuesto.</p>
+      <div class="row" style="gap:10px;align-items:center"><span class="btn ghost file">Cargar planilla de observaciones<input type="file" id="inf_plan" accept=".xlsx,.xlsm" aria-label="Cargar planilla de observaciones"></span><button class="btn ghost" type="button" data-ia="plantilla">Descargar planilla modelo</button>${P?`<button class="btn ghost" type="button" data-ia="quitar-plan">Quitar</button>`:''}</div>
+      ${P?(P.busy?'<p class="hint">Leyendo la planilla…</p>':P.err?`<p class="inf-mal">${esc(P.err)}</p>`:`<p class="hint" style="margin:8px 0 4px">«${esc(P.archivo)}»: ${P.rows.length} ${P.rows.length===1?'observación':'observaciones'} y ${P.imagenes} ${P.imagenes===1?'imagen':'imágenes'}${P.omitidas?` · ${P.omitidas} imagen(es) en un formato que Word no admite (usa PNG o JPG)`:''}${P.sinLector?' · no pude leer las imágenes (cargó sin la librería de Excel)':''}.</p>
+        ${P.rows.map((h,k)=>`<div class="hall"><label style="display:flex;gap:8px;align-items:flex-start;font-weight:600;margin:0"><input type="checkbox" data-inf="plan.rows.${k}.incluir" ${h.incluir?'checked':''}><span>${esc(h.impuesto?h.impuesto+' · ':'')}${esc(h.titulo||h.texto.slice(0,140))}</span></label>${destino(h)}${(h.imgs||[]).length?`<div class="row" style="gap:8px;margin:4px 0 0 24px">${h.imgs.map(im=>im.url?`<img class="inf-mini" src="${esc(im.url)}" alt="Cuadro de la observación">`:`<small class="hint">cuadro ${esc(im.ext.toUpperCase())} (se verá en el Word)</small>`).join('')}</div>`:''}</div>`).join('')}`):''}`;
+  return`<div class="panel"><h2 style="margin:0 0 4px">Informe al cliente (Word)</h2><p class="hint" style="margin:0 0 10px"><b>${esc(c.razon||'')}</b> · NIT ${esc(c.nit||'')}. La carta «Revisión de impuestos» con los datos del cliente, los impuestos revisados, los documentos recibidos, las observaciones y el valor por pagar. Se genera en Word para que la puedas modificar.</p>
+    <div class="row" style="gap:12px;align-items:flex-end"><div style="flex:1"><label for="inf_f">Fecha del informe</label><input type="date" id="inf_f" data-inf="fecha" value="${esc(I.fecha)}"></div><div style="flex:1"><label for="inf_r">Fecha de revisión</label><input type="date" id="inf_r" data-inf="fechaRev" value="${esc(I.fechaRev)}"></div></div>
+    <h4 style="margin:14px 0 2px">Personas a quienes va dirigido (Atn.)</h4><p class="hint" style="margin:0 0 6px">Se escriben una sola vez: quedan guardadas en el perfil de este cliente y salen en cada informe (la primera con «Atn.»).</p>
+    ${(c.atencion||[]).map((p,i)=>`<div class="row" style="gap:8px;margin:3px 0"><input style="flex:2" type="text" aria-label="Nombre de la persona ${i+1}" data-atn="${i}.nombre" value="${esc(p.nombre)}" placeholder="Nombre y apellidos"><input style="flex:2" type="text" aria-label="Cargo de la persona ${i+1}" data-atn="${i}.cargo" value="${esc(p.cargo)}" placeholder="Cargo (Ej.: Representante Legal)"><button class="btn ghost" type="button" data-ia="atn-del:${i}" aria-label="Quitar a la persona ${i+1}">Quitar</button></div>`).join('')}
+    <button class="btn ghost" type="button" data-ia="atn-add" style="margin:4px 0 8px">Agregar persona</button>
+    <label for="inf_pie">Pie de página (opcional: dirección y teléfono de tu firma)</label><input type="text" id="inf_pie" data-inf="pie" value="${esc(I.pie)}" placeholder="Ej.: Dirección: Calle 1 # 2 - 3 • Teléfono: 300 000 0000"></div>
+    <div class="panel"><h3 style="margin:0 0 6px">Impuestos revisados y valor por pagar</h3><p class="hint" style="margin:0 0 6px">Marca los impuestos que revisaste. Carga la declaración en PDF (con texto) y el valor a pagar se lee solo; si es una imagen o un PDF escaneado, escríbelo.</p><div class="inf-fila inf-cab" aria-hidden="true"><span>Impuesto</span><span>Periodicidad</span><span>Período</span><span>Vence</span><span>Valor por pagar</span><span>Declaración</span></div>${I.imps.map((im,i)=>fila(i,im)).join('')}</div>
+    <div class="panel"><h3 style="margin:0 0 4px">Documentos recibidos</h3>${docs('Documentos requeridos en Excel','docsExcel',I.docsExcel)}${docs('Otros documentos requeridos','docsOtros',I.docsOtros)}</div>
+    <div class="panel"><h3 style="margin:0 0 6px">Observaciones</h3><div class="row" style="gap:8px"><button class="btn ${I.modo==='sin'?'':'ghost'}" type="button" data-ia="modo-sin" aria-pressed="${I.modo==='sin'}">Sin observaciones</button><button class="btn ${I.modo==='con'?'':'ghost'}" type="button" data-ia="modo-con" aria-pressed="${I.modo==='con'}">Con observaciones</button></div>${obsHtml}</div>
+    <div class="row" style="margin:14px 0"><button class="btn" type="button" data-ia="gen">Generar informe en Word</button></div>`;}
+function enlazarInformes(){
+  const m=document.getElementById('main');if(!m||!S.inf)return;
+  m.querySelectorAll('[data-inf]').forEach(el=>{const ev=el.type==='checkbox'||el.tagName==='SELECT'?'change':'input';el.addEventListener(ev,()=>{infSet(el.dataset.inf,el.type==='checkbox'?el.checked:el.value);if(el.dataset.rr)infRender();});});
+  m.querySelectorAll('[data-atn]').forEach(el=>el.addEventListener('input',()=>{const[i,k]=el.dataset.atn.split('.'),c=cur();if(c&&c.atencion&&c.atencion[+i]){c.atencion[+i][k]=el.value;persistSoon();}}));   // las personas se guardan en el perfil del cliente
+  m.querySelectorAll('[data-idecl]').forEach(el=>el.addEventListener('change',async()=>{const f=el.files&&el.files[0];if(f)await infLeerDeclaracion(+el.dataset.idecl,f);}));
+  const pl=m.querySelector('#inf_plan');if(pl)pl.addEventListener('change',async()=>{const f=pl.files&&pl.files[0];if(f)await infLeerPlanilla(f);});
+  m.querySelectorAll('[data-ia]').forEach(b=>b.addEventListener('click',()=>infAccion(b.dataset.ia)));}
+async function infLeerDeclaracion(i,f){
+  const I=S.inf,im=I.imps[i];im.decl={msg:'Leyendo «'+f.name+'»…',ok:false};infRender();let r=null,msg='';
+  try{
+    if(/\.pdf$/i.test(f.name)){const L=await pdfLines(f);if(!L.length)msg='El PDF no tiene texto (es una imagen escaneada): escribe el valor a pagar.';else{r=valorDeDeclaracionTexto(L,im.k);if(!r)msg='No encontré el valor a pagar en ese PDF (¿es la declaración de este impuesto?): escríbelo.';}}
+    else if(/\.(xlsx|xlsm|xls)$/i.test(f.name)&&im.k==='reteica'){for(const sh of await readSheets(f)){const x=parseForm131Excel(sh.rows);if(x&&x.casillas.TP!=null){r={valor:x.casillas.TP,casilla:'TP',etiqueta:'Total a pagar (renglón 14)'};break;}}if(!r)msg='No encontré el formulario 131 en ese Excel: escribe el valor a pagar.';}
+    else msg='Esa imagen no se lee aquí: sube el PDF de la declaración o escribe el valor a pagar.';
+  }catch(e){msg='No pude abrir el archivo (¿cargó el lector de PDF?): escribe el valor a pagar.';}
+  if(r){im.valor=String(r.valor);im.revisado=true;im.decl={msg:'Leído de «'+f.name+'»: '+r.etiqueta+' (casilla '+r.casilla+')',ok:true};}else im.decl={msg,ok:false};
+  infRender();}
+async function infLeerPlanilla(f){
+  const I=S.inf;I.plan={archivo:f.name,busy:true};infRender();let r=null;
+  try{if(!window.ExcelJS)throw new Error('sin ExcelJS');r=await leerPlanillaConImagenes(window.ExcelJS,await f.arrayBuffer());}
+  catch(e){try{for(const h of await readSheets(f)){const x=parsePlanillaHallazgos(h.rows);if(!x.err){r={rows:asignarImagenesAItems(x.rows,[]),imagenes:0,omitidas:0,sinLectorImagenes:true};break;}r=r||x;}}catch(e2){r={err:'No pude leer el archivo. Verifica que sea Excel (.xlsx).'};}}
+  if(!r||r.err){I.plan={archivo:f.name,err:(r&&r.err)||'No pude leer la planilla.'};}
+  else{const rows=r.rows.map(h=>Object.assign({},h,{incluir:true,imgs:(h.imgs||[]).map(im=>{let url='';try{if(im.ext!=='emf')url=URL.createObjectURL(new Blob([im.buf],{type:'image/'+im.ext}));}catch(e){}return Object.assign({},im,{url});})}));I.plan={archivo:f.name,rows,imagenes:r.imagenes,omitidas:r.omitidas,sinLector:!!r.sinLectorImagenes};}
+  infRender();}
+/* El contenido del informe con lo que hay en pantalla: {inf} o {err} */
+function infConstruir(){
+  const I=S.inf,c=cur();if(!I||!c)return{err:'Abre un cliente para preparar su informe.'};const rev=I.imps.filter(i=>i.revisado),tit=i=>String(i.titulo||i.nombre).trim();
+  if(!rev.length)return{err:'Marca al menos un impuesto revisado.'};
+  const secs=rev.map(i=>({titulo:tit(i),clave:i.nombre,revisado:true,sinObs:I.modo==='sin',textoSin:I.textoSin,hallazgos:[]}));
+  if(I.modo==='con'){if(!I.plan||!I.plan.rows)return{err:'Carga la planilla de observaciones, o cambia a «Sin observaciones».'};
+    const rep=repartirHallazgos(I.plan.rows.filter(h=>h.incluir),secs.map(s=>({titulo:s.titulo,clave:s.clave})));
+    secs.forEach((s,k)=>{s.hallazgos=rep[k].map(h=>({titulo:h.titulo,texto:h.texto,riesgo:h.riesgo,recomendacion:h.recomendacion,normatividad:h.normatividad,ref:h.ref,respuesta:h.comentarios,imgs:h.imgs||[]}));});}
+  return{inf:armarInforme({ciudad:String(c.municipio||'Bogotá D.C.'),fecha:I.fecha||hoyISO(),cliente:{razon:c.razon,nit:c.nit},atn:(c.atencion||[]).filter(p=>p&&String(p.nombre||'').trim()).map(p=>String(p.nombre).trim()+(String(p.cargo||'').trim()?' – '+String(p.cargo).trim():'')),pie:I.pie,vencimientos:rev.map(i=>({texto:tit(i),fecha:i.venc})).filter(v=>v.fecha),fechaRevision:I.fechaRev||hoyISO(),
+    impuestos:I.imps.map(i=>({nombre:i.nombre,periodicidad:i.periodicidad,periodo:i.k==='iva'?(i.periodoTxt||'N/A'):periodoLargoES(i.periodo),revisado:!!i.revisado})),docsExcel:I.docsExcel,docsOtros:I.docsOtros,secciones:secs,
+    porPagar:rev.map(i=>({concepto:tit(i),valor:String(i.valor).replace(/[^\d-]/g,'')})).filter(x=>x.valor!==''&&!isNaN(+x.valor))})};}
+async function infGenerar(){
+  const r=infConstruir();if(r.err){toast(r.err);return;}const I=S.inf,c=cur();
+  try{localStorage.setItem(INF_PIE_LS,I.pie||'');}catch(e){}
+  try{const bytes=construirDocx(r.inf),corto=String(c.razon||'cliente').replace(/\b(S\.?A\.?S\.?|S\.?A\.?|LTDA\.?)\b/gi,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim().split(' ').slice(0,3).join('_'),per=periodoLargoES((I.imps.find(i=>i.revisado)||{}).periodo).replace(/\s+/g,'_');
+    await saveFile('Informe_Revision_impuestos_'+per+'_-_'+(corto||'cliente')+'.docx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
+  catch(e){console.error(e);toast('No pude generar el informe en Word.');}}
+async function infAccion(a){
+  const I=S.inf;if(!I)return;
+  const c=cur();
+  if(a==='atn-add'&&c){(c.atencion=c.atencion||[]).push({nombre:'',cargo:''});await persist(c);infRender();}
+  else if(/^atn-del:\d+$/.test(a)&&c){c.atencion.splice(+a.slice(8),1);await persist(c);infRender();}
+  else if(a==='modo-sin'||a==='modo-con'){I.modo=a==='modo-sin'?'sin':'con';infRender();}
+  else if(a==='quitar-plan'){I.plan=null;infRender();}
+  else if(a==='plantilla'){if(!window.ExcelJS){toast('No cargó la librería de Excel; vuelve a intentarlo con conexión a internet.');return;}
+    try{const wb=buildPlanillaInforme(window.ExcelJS,{impuestos:I.imps.map(i=>i.titulo||i.nombre)}),buf=await wb.xlsx.writeBuffer();await saveFile('Planilla_observaciones_informe.xlsx',new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),true);}catch(e){console.error(e);toast('No pude generar la planilla.');}}
+  else if(a==='gen')await infGenerar();}
 async function download(){
   carpetaPrepara();
   if(S.imp==='reteica')return downloadRica();
@@ -14684,6 +14883,7 @@ document.addEventListener('click',async e=>{
   else if(a==='icaaddact'){S.ica.form.acts.push({cod:'',tarifa:'',base:null,imp:null});render();}
   else if(a==='pend'){collectClient();S.view='pend';render();}
   else if(a==='norma'){collectClient();S.view='norma';render();}
+  else if(a==='informes'){collectClient();S.view='informes';render();}
   else if(a==='uvtmanual'){S.normaPrev={archivo:'',manual:true,anio:'',valor:''};render();}
   else if(a==='uvtno'){S.normaPrev=null;render();}
   else if(a==='uvtdel'){const n=normaCargada();n.uvt=n.uvt.filter(x=>+x.anio!==+b.dataset.anio);normaGuardar(n);render();}
