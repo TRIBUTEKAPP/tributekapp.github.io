@@ -571,10 +571,31 @@ table.pend tr.pend-ok{opacity:.78}
 .pend-vacio b{display:block;font-size:1.15rem;color:var(--ok);margin-bottom:4px}
 .pend-vacio p{margin:0 0 12px;color:var(--ink)}
 /* Espacio de informes */
-.inf-fila{display:grid;grid-template-columns:1.5fr .9fr 1.2fr 1fr 1fr 1.7fr;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #d9dde3}.inf-cab{font-weight:600;font-size:.85em;color:#555;border-bottom:2px solid #d9dde3}
-.inf-chk{display:flex;gap:6px;align-items:center;margin:0}.inf-decl{display:flex;flex-direction:column;gap:2px}.inf-decl small{display:block}.inf-ok{color:#1a7f37}.inf-mal{color:#a14b00}
-.inf-mini{max-height:70px;max-width:150px;border:1px solid #cfd4db;border-radius:4px}
-@media (max-width:900px){.inf-fila{grid-template-columns:1fr}.inf-cab{display:none}}
+.inf-top-h{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:flex-start}
+.inf-guardado{font-size:13px;color:var(--muted);padding:5px 12px;border-radius:999px;background:var(--soft);max-width:100%}.inf-guardado.ok{color:var(--ok);background:var(--ok-bg)}.inf-guardado.mal{color:var(--warn);background:var(--warn-bg)}
+.inf-cli-sel{max-width:620px;margin:6px 0 4px}.inf-cli-sel select{width:100%}
+.inf-dos{display:grid;grid-template-columns:repeat(2,minmax(150px,230px));gap:14px;margin:8px 0}
+.inf-sub{margin:16px 0 4px;font-size:14px;color:var(--accent)}
+.inf-pers{display:grid;gap:8px;margin:6px 0}.inf-per{display:grid;grid-template-columns:minmax(180px,2fr) minmax(180px,1.6fr) auto;gap:8px;align-items:center}.inf-per input{width:100%;min-width:0}
+.inf-tabla{display:grid;gap:8px;margin-top:8px}
+.inf-g{display:grid;grid-template-columns:minmax(190px,1.5fr) 124px minmax(220px,1.3fr) 152px 172px minmax(230px,1.8fr);gap:12px;align-items:center}
+.inf-g input,.inf-g select{width:100%;min-width:0}
+.inf-cab{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:0 20px}
+.inf-fila{padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:var(--radius);background:var(--surface);transition:background .15s,border-color .15s}
+.inf-fila.on{background:var(--soft);border-left-color:var(--brand)}.inf-fila.off .inf-chk span{color:var(--muted)}
+.inf-chk{display:flex;gap:10px;align-items:center;margin:0;cursor:pointer;font-weight:700;color:var(--ink)}.inf-chk input{width:18px;height:18px;flex:none;margin:0}
+.inf-monto{position:relative}.inf-monto span{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}.inf-monto input{padding-left:26px;text-align:right;font-variant-numeric:tabular-nums}
+.inf-decl{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}.inf-decl small{display:block}.inf-sube{font-size:13px;padding:7px 14px;white-space:nowrap}
+.inf-chip{font-size:12.5px;line-height:1.4;padding:5px 10px;border-radius:8px;background:var(--soft);color:var(--muted);overflow-wrap:anywhere}.inf-chip.ok{background:var(--ok-bg);color:var(--ok)}.inf-chip.mal{background:var(--warn-bg);color:var(--warn)}
+.inf-total{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding:12px 18px;border-radius:var(--radius);background:var(--accent);color:var(--accent-ink);font-weight:600}.inf-total b{font-size:19px;font-variant-numeric:tabular-nums}
+.inf-doc{display:grid;grid-template-columns:minmax(220px,3fr) minmax(160px,2fr);gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}.inf-doc input{width:100%;min-width:0}
+.inf-seg{display:inline-flex;border:1px solid var(--accent);border-radius:999px;overflow:hidden;margin-top:4px}.inf-seg button{border:0;background:var(--surface);color:var(--accent);padding:9px 20px;font:inherit;font-weight:600;cursor:pointer}.inf-seg button+button{border-left:1px solid var(--accent)}.inf-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.inf-ok{color:var(--ok)}.inf-mal{color:var(--warn)}
+.inf-mini{max-height:70px;max-width:150px;border:1px solid var(--line);border-radius:4px}
+/* Espacio justo (junto a la barra lateral): cinco columnas y la declaración en una franja debajo de cada impuesto */
+@media (max-width:1500px){.inf-g{grid-template-columns:minmax(170px,1.5fr) 112px minmax(215px,1.3fr) 146px 160px}.inf-cab>span:last-child{display:none}.inf-decl{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:10px;border-top:1px dashed var(--line)}.inf-decl::before{content:attr(data-label);font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}}
+@media (max-width:1180px){.inf-cab{display:none}.inf-g{grid-template-columns:repeat(2,minmax(0,1fr))}.inf-g>:first-child{grid-column:1/-1}.inf-g>[data-label]::before{content:attr(data-label);display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:3px}.inf-decl{grid-column:1/-1}}
+@media (max-width:640px){.inf-g{grid-template-columns:1fr}.inf-per,.inf-doc,.inf-dos{grid-template-columns:1fr}}
 /* Barra lateral: con el ítem «Informes» (cuatro ítems), espacios un poco más ajustados para que la barra no se desplace (pantallas altas aquí; las bajas, en la regla de max-height:779px) */
 @media (min-height:780px){.rail{gap:10px;padding-top:16px;padding-bottom:16px}.brandbox{padding-bottom:10px}.railacts{gap:6px}.nav-item{min-height:40px}}
 
@@ -14724,45 +14745,79 @@ function infInicial(c){
   if(!c.atencion.length&&atn.trim()){c.atencion=atn.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map(s=>{const m=/^(.*?)\s+[–-]\s+(.+)$/.exec(s);return m?{nombre:m[1].trim(),cargo:m[2].trim()}:{nombre:s,cargo:''};});persistSoon();}   // lo escrito en versiones anteriores pasa al perfil del cliente
   let obs=[];try{obs=obligacionesCliente(c,allCals());}catch(e){}
   const mk=(k,nombre,titulo,periodicidad,imp)=>{const periodo=imp?infPeriodoPrev(k,periodicidad):'';return{k,nombre,titulo,periodicidad,periodo,periodoTxt:'',revisado:k==='retefuente',valor:'',venc:imp?((obs.find(o=>o.imp===imp&&o.id===periodo))||{}).fecha||'':'',decl:null};};
-  return{cid:c.id,fecha:hoyISO(),fechaRev:hoyISO(),pie,modo:'sin',revisoria:false,textoSin:textoSinObservaciones(false),textoEditado:false,
+  const o={cid:c.id,fecha:hoyISO(),fechaRev:hoyISO(),pie,modo:'sin',revisoria:false,textoSin:textoSinObservaciones(false),textoEditado:false,
     imps:[mk('retefuente','Retención en la Fuente','Retención en la fuente','Mensual','retefuente'),mk('iva','IVA','IVA',c.iva==='Sí'?(c.periodicidad||'N/A'):'N/A',null),mk('ica','ICA','ICA',c.icaRegimen||'N/A','ica'),mk('reteica','Retención ICA '+mun,'Retención de ICA',c.agenteReteICA==='Sí'?'Bimestral':'N/A','reteica')],
-    docsExcel:INF_DOCS_EXCEL.map(([doc,estado])=>({doc,estado})),docsOtros:INF_DOCS_OTROS.map(([doc,estado])=>({doc,estado})),plan:null};}
+    docsExcel:INF_DOCS_EXCEL.map(([doc,estado])=>({doc,estado})),docsOtros:INF_DOCS_OTROS.map(([doc,estado])=>({doc,estado})),plan:null};
+  const P=c.informe;   // lo que se fue guardando en el perfil de este cliente: revisoría fiscal, párrafo, documentos recibidos, periodicidades y nombres de sección
+  if(P&&typeof P==='object'){o.revisoria=!!P.revisoria;if(P.textoSin){o.textoSin=P.textoSin;o.textoEditado=true;}else o.textoSin=textoSinObservaciones(o.revisoria);
+    for(const k of ['docsExcel','docsOtros'])if(Array.isArray(P[k])&&P[k].length)o[k]=P[k].map(d=>({doc:String(d.doc||''),estado:String(d.estado==null?'':d.estado)}));
+    for(const g of P.imps||[]){const im=o.imps.find(i=>i.k===g.k);if(im){if(typeof g.titulo==='string'&&g.titulo)im.titulo=g.titulo;if(typeof g.periodicidad==='string'&&g.periodicidad)im.periodicidad=g.periodicidad;if(typeof g.periodoTxt==='string')im.periodoTxt=g.periodoTxt;}}}
+  return o;}
+const INF_CARGOS=['Representante Legal','Representante Legal Suplente','Gerente','Contador','Contador General','Revisor Fiscal','Director Financiero','Director Administrativo','Asistente Contable','Socio'];
+function infFmtMonto(d){const s=String(d==null?'':d).replace(/\D/g,'');return s?Number(s).toLocaleString('es-CO'):'';}
+function infTotal(I){return(I.imps||[]).filter(i=>i.revisado).reduce((s,i)=>s+(+String(i.valor).replace(/\D/g,'')||0),0);}
+function infTotalAct(){const el=document.getElementById('inf_total');if(el&&S.inf)el.textContent='$ '+infFmtMonto(infTotal(S.inf)||'');}
+/* Lo que se escribe en el informe y es del cliente (no del período) se guarda en su perfil, como el socio y el encargado */
+function infGuardarPerfil(){const c=cur(),I=S.inf;if(!c||!I)return;
+  c.informe={revisoria:!!I.revisoria,textoSin:I.textoEditado?I.textoSin:'',docsExcel:I.docsExcel.map(d=>({doc:d.doc,estado:d.estado})),docsOtros:I.docsOtros.map(d=>({doc:d.doc,estado:d.estado})),imps:I.imps.map(i=>({k:i.k,titulo:i.titulo||'',periodicidad:i.periodicidad||'',periodoTxt:i.periodoTxt||''}))};}
+function infEstadoGuardado(txt,cls){const el=document.getElementById('inf_guardado');if(el){el.textContent=txt;el.className='inf-guardado '+(cls||'');}}
+let infTmr=null;
+function infGuardarSoon(){const c=cur();if(!c)return;
+  if(c._new){infEstadoGuardado('Este cliente aún no está guardado: guárdalo en la pestaña «Cliente» para conservar estos datos.','mal');return;}
+  infEstadoGuardado('Guardando…','');clearTimeout(infTmr);
+  infTmr=setTimeout(async()=>{infGuardarPerfil();try{await persist(c);infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}catch(e){infEstadoGuardado('No pude guardar: quedó en este navegador.','mal');}},500);}
 function infSet(path,val){const I=S.inf;if(!I)return;const p=path.split('.');let o=I;for(let i=0;i<p.length-1;i++)o=o[p[i]];o[p[p.length-1]]=val;
-  if(path==='revisoria'&&!I.textoEditado)I.textoSin=textoSinObservaciones(!!val);if(path==='textoSin')I.textoEditado=true;}
+  if(path==='revisoria'&&!I.textoEditado)I.textoSin=textoSinObservaciones(!!val);if(path==='textoSin')I.textoEditado=true;
+  if(/^(revisoria|textoSin|docsExcel\.|docsOtros\.|imps\.\d+\.(periodicidad|periodoTxt|titulo))/.test(path))infGuardarSoon();}
+async function infCambiarCliente(id){   // como al abrir un cliente desde el tablero
+  collectClient();if(borradoresConDatos([id]).length&&!await confirmarDescarte([id]))return;
+  S.clients=S.clients.filter(x=>!x._new||x.id===id);S.id=id;S.inf=null;S.view='informes';S.data={};S.results=null;resetRica();resetIca();resetForm();restoreForm(cur()&&cur().periods[S.period]);render();}
 function infRender(){const y=window.scrollY;render();try{window.scrollTo(0,y);}catch(e){}}
 function viewInformes(){
-  const c=cur();if(!c)return`<div class="empty"><h2>Informes</h2><p>Abre un cliente desde «Inicio» para preparar su informe: los datos del cliente salen de su perfil.</p></div>`;
-  if(!S.inf||S.inf.cid!==c.id)S.inf=infInicial(c);const I=S.inf,fila=(i,im)=>{
+  const c=cur(),lista=S.clients.filter(x=>!x._new||(c&&x.id===c.id)).sort((p,q)=>String(p.razon||'').localeCompare(String(q.razon||''),'es'));
+  if(!c&&!lista.length)return`<div class="empty"><h2>Informes</h2><p>Abre un cliente desde «Inicio» para preparar su informe: los datos del cliente salen de su perfil.</p></div>`;
+  const selCli=`<label for="inf_cli">Cliente</label><select id="inf_cli" aria-label="Cliente del informe">${c?'':'<option value="">Elige un cliente…</option>'}${lista.map(x=>`<option value="${esc(x.id)}" ${c&&x.id===c.id?'selected':''}>${esc(x.razon||'(sin nombre)')}${x.nit?' · '+esc(x.nit):''}</option>`).join('')}</select>`;
+  if(!c)return`<div class="panel"><h3>Informes</h3><p class="hint">Elige el cliente para preparar su informe: sus datos (representante legal, contador, etc.) se guardan en su perfil y la próxima vez ya están.</p><div class="inf-cli-sel">${selCli}</div></div>`;
+  if(!S.inf||S.inf.cid!==c.id)S.inf=infInicial(c);const I=S.inf;
+  const fila=(i,im)=>{
     const per=im.k==='iva'?`<input type="text" aria-label="Período del IVA" data-inf="imps.${i}.periodoTxt" value="${esc(im.periodoTxt)}" placeholder="Ej.: Enero - Abril 2026">`:`<select aria-label="Período de ${esc(im.nombre)}" data-inf="imps.${i}.periodo" data-rr="1">${infOpcionesPeriodo(im.k,im.periodicidad,im.periodo).map(p=>`<option value="${esc(p)}" ${p===im.periodo?'selected':''}>${esc(periodoLargoES(p))}</option>`).join('')}</select>`;
-    const aceptaXls=im.k==='reteica',decl=im.k==='iva'?'<small class="hint">El valor del IVA se escribe a mano.</small>':`<input type="file" aria-label="Declaración de ${esc(im.nombre)}" data-idecl="${i}" accept=".pdf${aceptaXls?',.xlsx,.xlsm,.xls':''}">${im.decl?`<small class="${im.decl.ok?'inf-ok':'inf-mal'}">${esc(im.decl.msg)}</small>`:'<small class="hint">PDF de la declaración (con texto): se lee el valor a pagar.</small>'}`;
-    return`<div class="inf-fila"><label class="inf-chk"><input type="checkbox" data-inf="imps.${i}.revisado" ${im.revisado?'checked':''} data-rr="1" aria-label="${esc(im.nombre)} revisado"> <b>${esc(im.nombre)}</b></label>
-      <input type="text" aria-label="Periodicidad de ${esc(im.nombre)}" data-inf="imps.${i}.periodicidad" value="${esc(im.periodicidad)}">${per}
-      <input type="date" aria-label="Vencimiento de ${esc(im.nombre)}" data-inf="imps.${i}.venc" value="${esc(im.venc)}">
-      <input type="text" inputmode="numeric" aria-label="Valor por pagar de ${esc(im.nombre)}" data-inf="imps.${i}.valor" value="${esc(im.valor)}" placeholder="Valor por pagar">
-      <div class="inf-decl">${decl}</div></div>`;};
-  const docs=(t,k,l)=>`<h4 style="margin:12px 0 4px">${t}</h4>${l.map((d,j)=>`<div class="row" style="gap:8px;margin:2px 0"><span style="flex:3">${esc(d.doc)}</span><input style="flex:2" type="text" aria-label="Estado: ${esc(d.doc)}" data-inf="${k}.${j}.estado" value="${esc(d.estado)}"></div>`).join('')}`;
+    const aceptaXls=im.k==='reteica',d=im.decl;
+    const decl=im.k==='iva'?'<small class="hint">El valor del IVA se escribe a mano.</small>':`<label class="btn ghost file inf-sube"><span>${d&&d.ok?'Cambiar la declaración':'Cargar declaración'}</span><input type="file" aria-label="Declaración de ${esc(im.nombre)}" data-idecl="${i}" accept=".pdf${aceptaXls?',.xlsx,.xlsm,.xls':''}"></label>${d?`<span class="inf-chip ${d.ok?'ok':'mal'}">${esc(d.msg)}</span>`:'<small class="hint">PDF de la declaración (con texto): se lee el valor a pagar.</small>'}`;
+    return`<div class="inf-g inf-fila ${im.revisado?'on':'off'}" role="row"><label class="inf-chk"><input type="checkbox" data-inf="imps.${i}.revisado" ${im.revisado?'checked':''} data-rr="1" aria-label="${esc(im.nombre)} revisado"><span>${esc(im.nombre)}</span></label>
+      <div data-label="Periodicidad"><input type="text" aria-label="Periodicidad de ${esc(im.nombre)}" data-inf="imps.${i}.periodicidad" value="${esc(im.periodicidad)}"></div>
+      <div data-label="Período">${per}</div>
+      <div data-label="Vence"><input type="date" aria-label="Vencimiento de ${esc(im.nombre)}" data-inf="imps.${i}.venc" value="${esc(im.venc)}"></div>
+      <div data-label="Valor por pagar"><div class="inf-monto"><span aria-hidden="true">$</span><input type="text" inputmode="numeric" aria-label="Valor por pagar de ${esc(im.nombre)}" data-inf="imps.${i}.valor" data-monto="1" value="${esc(infFmtMonto(im.valor))}" placeholder="0"></div></div>
+      <div class="inf-decl" data-label="Declaración (PDF)">${decl}</div></div>`;};
+  const docs=(t,k,l)=>`<h4 class="inf-sub">${t}</h4>${l.map((d,j)=>`<div class="inf-doc"><span>${esc(d.doc)}</span><input type="text" aria-label="Estado: ${esc(d.doc)}" data-inf="${k}.${j}.estado" value="${esc(d.estado)}"></div>`).join('')}`;
   const secsRev=I.imps.filter(i=>i.revisado).map(i=>({titulo:String(i.titulo||i.nombre).trim(),clave:i.nombre})),destino=h=>{if(!secsRev.length)return'';const d=destinoHallazgo(h,secsRev);return d.coincide?`<small class="hint" style="display:block;margin:2px 0 0 24px">Va en «${esc(secsRev[d.k].titulo)}»</small>`:`<small class="inf-mal" style="display:block;margin:2px 0 0 24px">Su impuesto («${esc(h.impuesto)}») no coincide con ninguno de los marcados: irá a «${esc(secsRev[0].titulo)}». Desmárcala o corrige el nombre en la planilla.</small>`;};
-  const P=I.plan,obsHtml=I.modo==='sin'?`<p class="hint" style="margin:4px 0">Cada impuesto marcado sale con «Sin observaciones» y este párrafo (puedes editarlo):</p>
+  const P=I.plan,obsHtml=I.modo==='sin'?`<p class="hint" style="margin:10px 0 6px">Cada impuesto marcado sale con «Sin observaciones» y este párrafo (puedes editarlo):</p>
       <textarea rows="3" style="width:100%" aria-label="Párrafo de la revisión sin observaciones" data-inf="textoSin">${esc(I.textoSin)}</textarea>
-      <label style="font-weight:400;display:block;margin:6px 0"><input type="checkbox" data-inf="revisoria" data-rr="1" ${I.revisoria?'checked':''}> La declaración se encuentra firmada por revisoría fiscal</label>`
-    :`<p class="hint" style="margin:4px 0">Carga la planilla con las observaciones (una fila por observación; si lleva un cuadro, la imagen va pegada en su fila). Se organizan uno a uno en la sección de su impuesto.</p>
+      <label style="font-weight:400;display:block;margin:8px 0 0"><input type="checkbox" data-inf="revisoria" data-rr="1" ${I.revisoria?'checked':''}> La declaración se encuentra firmada por revisoría fiscal</label>`
+    :`<p class="hint" style="margin:10px 0 6px">Carga la planilla con las observaciones (una fila por observación; si lleva un cuadro, la imagen va pegada en su fila). Se organizan uno a uno en la sección de su impuesto.</p>
       <div class="row" style="gap:10px;align-items:center"><span class="btn ghost file">Cargar planilla de observaciones<input type="file" id="inf_plan" accept=".xlsx,.xlsm" aria-label="Cargar planilla de observaciones"></span><button class="btn ghost" type="button" data-ia="plantilla">Descargar planilla modelo</button>${P?`<button class="btn ghost" type="button" data-ia="quitar-plan">Quitar</button>`:''}</div>
       ${P?(P.busy?'<p class="hint">Leyendo la planilla…</p>':P.err?`<p class="inf-mal">${esc(P.err)}</p>`:`<p class="hint" style="margin:8px 0 4px">«${esc(P.archivo)}»: ${P.rows.length} ${P.rows.length===1?'observación':'observaciones'} y ${P.imagenes} ${P.imagenes===1?'imagen':'imágenes'}${P.omitidas?` · ${P.omitidas} imagen(es) en un formato que Word no admite (usa PNG o JPG)`:''}${P.sinLector?' · no pude leer las imágenes (cargó sin la librería de Excel)':''}.</p>
         ${P.rows.map((h,k)=>`<div class="hall"><label style="display:flex;gap:8px;align-items:flex-start;font-weight:600;margin:0"><input type="checkbox" data-inf="plan.rows.${k}.incluir" ${h.incluir?'checked':''}><span>${esc(h.impuesto?h.impuesto+' · ':'')}${esc(h.titulo||h.texto.slice(0,140))}</span></label>${destino(h)}${(h.imgs||[]).length?`<div class="row" style="gap:8px;margin:4px 0 0 24px">${h.imgs.map(im=>im.url?`<img class="inf-mini" src="${esc(im.url)}" alt="Cuadro de la observación">`:`<small class="hint">cuadro ${esc(im.ext.toUpperCase())} (se verá en el Word)</small>`).join('')}</div>`:''}</div>`).join('')}`):''}`;
-  return`<div class="panel"><h2 style="margin:0 0 4px">Informe al cliente (Word)</h2><p class="hint" style="margin:0 0 10px"><b>${esc(c.razon||'')}</b> · NIT ${esc(c.nit||'')}. La carta «Revisión de impuestos» con los datos del cliente, los impuestos revisados, los documentos recibidos, las observaciones y el valor por pagar. Se genera en Word para que la puedas modificar.</p>
-    <div class="row" style="gap:12px;align-items:flex-end"><div style="flex:1"><label for="inf_f">Fecha del informe</label><input type="date" id="inf_f" data-inf="fecha" value="${esc(I.fecha)}"></div><div style="flex:1"><label for="inf_r">Fecha de revisión</label><input type="date" id="inf_r" data-inf="fechaRev" value="${esc(I.fechaRev)}"></div></div>
-    <h4 style="margin:14px 0 2px">Personas a quienes va dirigido (Atn.)</h4><p class="hint" style="margin:0 0 6px">Se escriben una sola vez: quedan guardadas en el perfil de este cliente y salen en cada informe (la primera con «Atn.»).</p>
-    ${(c.atencion||[]).map((p,i)=>`<div class="row" style="gap:8px;margin:3px 0"><input style="flex:2" type="text" aria-label="Nombre de la persona ${i+1}" data-atn="${i}.nombre" value="${esc(p.nombre)}" placeholder="Nombre y apellidos"><input style="flex:2" type="text" aria-label="Cargo de la persona ${i+1}" data-atn="${i}.cargo" value="${esc(p.cargo)}" placeholder="Cargo (Ej.: Representante Legal)"><button class="btn ghost" type="button" data-ia="atn-del:${i}" aria-label="Quitar a la persona ${i+1}">Quitar</button></div>`).join('')}
-    <button class="btn ghost" type="button" data-ia="atn-add" style="margin:4px 0 8px">Agregar persona</button>
+  return`<div class="panel inf-top"><div class="inf-top-h"><div><h2 style="margin:0 0 4px">Informe al cliente (Word)</h2><p class="hint" style="margin:0 0 6px">La carta «Revisión de impuestos» con los datos del cliente, los impuestos revisados, los documentos recibidos, las observaciones y el valor por pagar. Se genera en Word para que la puedas modificar.</p></div><span id="inf_guardado" class="inf-guardado">Lo que escribas del cliente se guarda en su perfil</span></div>
+    <div class="inf-cli-sel">${selCli}</div><p class="hint" style="margin:0 0 8px">NIT ${esc(c.nit||'—')} · ${esc(c.municipio||'Bogotá D.C.')} · la razón social y el NIT salen del perfil (pestaña «Cliente»)</p>
+    <div class="inf-dos"><div><label for="inf_f">Fecha del informe</label><input type="date" id="inf_f" data-inf="fecha" value="${esc(I.fecha)}"></div><div><label for="inf_r">Fecha de revisión</label><input type="date" id="inf_r" data-inf="fechaRev" value="${esc(I.fechaRev)}"></div></div>
+    <h4 class="inf-sub">Personas a quienes va dirigido (Atn.)</h4><p class="hint" style="margin:0 0 6px">Se escriben una sola vez: quedan guardadas en el perfil de este cliente y salen en cada informe (la primera con «Atn.»).</p>
+    <div class="inf-pers">${(c.atencion||[]).map((p,i)=>`<div class="inf-per"><input type="text" aria-label="Nombre de la persona ${i+1}" data-atn="${i}.nombre" value="${esc(p.nombre)}" placeholder="Nombre y apellidos"><input type="text" list="inf_cargos" aria-label="Cargo de la persona ${i+1}" data-atn="${i}.cargo" value="${esc(p.cargo)}" placeholder="Cargo (Ej.: Representante Legal)"><button class="btn ghost" type="button" data-ia="atn-del:${i}" aria-label="Quitar a la persona ${i+1}">Quitar</button></div>`).join('')}</div>
+    <datalist id="inf_cargos">${INF_CARGOS.map(x=>`<option value="${esc(x)}">`).join('')}</datalist><div style="margin:6px 0 14px"><button class="btn ghost" type="button" data-ia="atn-add">Agregar persona</button></div>
     <label for="inf_pie">Pie de página (opcional: dirección y teléfono de tu firma)</label><input type="text" id="inf_pie" data-inf="pie" value="${esc(I.pie)}" placeholder="Ej.: Dirección: Calle 1 # 2 - 3 • Teléfono: 300 000 0000"></div>
-    <div class="panel"><h3 style="margin:0 0 6px">Impuestos revisados y valor por pagar</h3><p class="hint" style="margin:0 0 6px">Marca los impuestos que revisaste. Carga la declaración en PDF (con texto) y el valor a pagar se lee solo; si es una imagen o un PDF escaneado, escríbelo.</p><div class="inf-fila inf-cab" aria-hidden="true"><span>Impuesto</span><span>Periodicidad</span><span>Período</span><span>Vence</span><span>Valor por pagar</span><span>Declaración</span></div>${I.imps.map((im,i)=>fila(i,im)).join('')}</div>
-    <div class="panel"><h3 style="margin:0 0 4px">Documentos recibidos</h3>${docs('Documentos requeridos en Excel','docsExcel',I.docsExcel)}${docs('Otros documentos requeridos','docsOtros',I.docsOtros)}</div>
-    <div class="panel"><h3 style="margin:0 0 6px">Observaciones</h3><div class="row" style="gap:8px"><button class="btn ${I.modo==='sin'?'':'ghost'}" type="button" data-ia="modo-sin" aria-pressed="${I.modo==='sin'}">Sin observaciones</button><button class="btn ${I.modo==='con'?'':'ghost'}" type="button" data-ia="modo-con" aria-pressed="${I.modo==='con'}">Con observaciones</button></div>${obsHtml}</div>
+    <div class="panel"><h3>Impuestos revisados y valor por pagar</h3><p class="hint">Marca los impuestos que revisaste. Carga la declaración en PDF (con texto) y el valor a pagar se lee solo; si es una imagen o un PDF escaneado, escríbelo.</p>
+      <div class="inf-tabla" role="table"><div class="inf-g inf-cab" role="row" aria-hidden="true"><span>Impuesto</span><span>Periodicidad</span><span>Período</span><span>Vence</span><span>Valor por pagar</span><span>Declaración (PDF)</span></div>${I.imps.map((im,i)=>fila(i,im)).join('')}</div>
+      <div class="inf-total"><span>Total por pagar de los impuestos marcados</span><b id="inf_total">$ ${infFmtMonto(infTotal(I)||'')||'0'}</b></div></div>
+    <div class="panel"><h3>Documentos recibidos</h3><p class="hint">Se guardan en el perfil de este cliente: la próxima vez ya vienen como los dejaste.</p>${docs('Documentos requeridos en Excel','docsExcel',I.docsExcel)}${docs('Otros documentos requeridos','docsOtros',I.docsOtros)}</div>
+    <div class="panel"><h3>Observaciones</h3><div class="inf-seg" role="group" aria-label="Tipo de informe"><button type="button" data-ia="modo-sin" aria-pressed="${I.modo==='sin'}">Sin observaciones</button><button type="button" data-ia="modo-con" aria-pressed="${I.modo==='con'}">Con observaciones</button></div>${obsHtml}</div>
     <div class="row" style="margin:14px 0"><button class="btn" type="button" data-ia="gen">Generar informe en Word</button></div>`;}
 function enlazarInformes(){
   const m=document.getElementById('main');if(!m||!S.inf)return;
-  m.querySelectorAll('[data-inf]').forEach(el=>{const ev=el.type==='checkbox'||el.tagName==='SELECT'?'change':'input';el.addEventListener(ev,()=>{infSet(el.dataset.inf,el.type==='checkbox'?el.checked:el.value);if(el.dataset.rr)infRender();});});
-  m.querySelectorAll('[data-atn]').forEach(el=>el.addEventListener('input',()=>{const[i,k]=el.dataset.atn.split('.'),c=cur();if(c&&c.atencion&&c.atencion[+i]){c.atencion[+i][k]=el.value;persistSoon();}}));   // las personas se guardan en el perfil del cliente
+  m.querySelectorAll('[data-inf]').forEach(el=>{const ev=el.type==='checkbox'||el.tagName==='SELECT'?'change':'input';el.addEventListener(ev,()=>{
+    if(el.dataset.monto){const d=el.value.replace(/\D/g,'');infSet(el.dataset.inf,d);el.value=infFmtMonto(d);infTotalAct();return;}   // el monto se escribe con puntos de miles y se guarda solo con dígitos
+    infSet(el.dataset.inf,el.type==='checkbox'?el.checked:el.value);if(el.dataset.rr)infRender();});});
+  const sc=m.querySelector('#inf_cli');if(sc)sc.addEventListener('change',()=>{if(sc.value)infCambiarCliente(sc.value);});
+  m.querySelectorAll('[data-atn]').forEach(el=>el.addEventListener('input',()=>{const[i,k]=el.dataset.atn.split('.'),c=cur();if(c&&c.atencion&&c.atencion[+i]){c.atencion[+i][k]=el.value;infGuardarSoon();}}));   // las personas se guardan en el perfil del cliente
   m.querySelectorAll('[data-idecl]').forEach(el=>el.addEventListener('change',async()=>{const f=el.files&&el.files[0];if(f)await infLeerDeclaracion(+el.dataset.idecl,f);}));
   const pl=m.querySelector('#inf_plan');if(pl)pl.addEventListener('change',async()=>{const f=pl.files&&pl.files[0];if(f)await infLeerPlanilla(f);});
   m.querySelectorAll('[data-ia]').forEach(b=>b.addEventListener('click',()=>infAccion(b.dataset.ia)));}
@@ -14802,8 +14857,8 @@ async function infGenerar(){
 async function infAccion(a){
   const I=S.inf;if(!I)return;
   const c=cur();
-  if(a==='atn-add'&&c){(c.atencion=c.atencion||[]).push({nombre:'',cargo:''});await persist(c);infRender();}
-  else if(/^atn-del:\d+$/.test(a)&&c){c.atencion.splice(+a.slice(8),1);await persist(c);infRender();}
+  if(a==='atn-add'&&c){(c.atencion=c.atencion||[]).push({nombre:'',cargo:''});await persist(c);infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
+  else if(/^atn-del:\d+$/.test(a)&&c){c.atencion.splice(+a.slice(8),1);await persist(c);infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
   else if(a==='modo-sin'||a==='modo-con'){I.modo=a==='modo-sin'?'sin':'con';infRender();}
   else if(a==='quitar-plan'){I.plan=null;infRender();}
   else if(a==='plantilla'){if(!window.ExcelJS){toast('No cargó la librería de Excel; vuelve a intentarlo con conexión a internet.');return;}
