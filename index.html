@@ -12107,6 +12107,17 @@ function validarClienteInforme(ext,cli){
   return{ok:false,estado:'indeterminado',msg:'No pude confirmar que sea el informe de este cliente: '+(nb?'el cliente abierto no tiene NIT para compararlo':'el informe no trae NIT ni un nombre parecido')+'. No se tomó nada.'};}
 /* Agrega a las personas actuales las nuevas que no estén ya (por nombre, sin importar tildes ni mayúsculas) */
 function combinarPersonas(actuales,nuevas){const out=(actuales||[]).map(p=>({nombre:p.nombre,cargo:p.cargo})),vistos=new Set(out.map(p=>_plN(p.nombre)));for(const p of nuevas||[]){const k=_plN(p.nombre);if(k&&!vistos.has(k)){vistos.add(k);out.push({nombre:p.nombre,cargo:p.cargo||''});}}return out;}
+/* Nombre del archivo del informe: «10. Revisión de impuestos Octubre - Cliente.docx». El número es el del mes del período revisado, con dos cifras («05.»); un bimestre usa su último mes para el número y «Septiembre - Octubre» como mes; un año, «12.» y el año. El cliente va sin la sociedad (S.A.S., Ltda., S.A.…) y sin los signos que los archivos no admiten. */
+function nombreArchivoInforme(razon,periodo){
+  const C=x=>x.charAt(0).toUpperCase()+x.slice(1),p=String(periodo||'');let num='',mes='',m;
+  if((m=/^(\d{4})-(\d{2})$/.exec(p))&&+m[2]>=1&&+m[2]<=12){num=m[2];mes=C(_MES_L[+m[2]-1]);}
+  else if((m=/^(\d{4})-B([1-6])$/.exec(p))){const b=+m[2];num=String(2*b).padStart(2,'0');mes=C(_MES_L[2*b-2])+' - '+C(_MES_L[2*b-1]);}
+  else if((m=/^(\d{4})$/.exec(p))){num='12';mes=m[1];}
+  let cli=String(razon==null?'':razon).replace(/[\\\/:*?"<>|\u0000-\u001f]+/g,' ').replace(/\s+/g,' ').trim();
+  for(let i=0;i<3;i++)cli=cli.replace(/[\s,]+(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA\.?|E\.?\s?U\.?|S\.?\s?EN\s?C\.?)$/i,'').trim();
+  if(/^(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA\.?|E\.?\s?U\.?)$/i.test(cli))cli='';   // un «nombre» que es solo la sociedad no es un nombre
+  if(cli.length>60)cli=cli.slice(0,60).replace(/\s+\S*$/,'').trim();cli=cli.replace(/[\s.]+$/,'');
+  return(num?num+'. ':'')+'Revisión de impuestos'+(mes?' '+mes:'')+' - '+(cli||'Cliente')+'.docx';}
 
 
 
@@ -14747,8 +14758,8 @@ function abrirInforme(){
     const porPagar=d.secs.map((s,i)=>({concepto:s.titulo,valor:String(val('#inf_v'+i)).replace(/[^\d-]/g,'')})).filter(x=>x.valor!==''&&!isNaN(+x.valor));
     const venc=d.secs.filter(s=>s.venc).map(s=>({texto:s.titulo,fecha:s.venc}));
     const inf=armarInforme({ciudad:String(c.municipio||'Bogotá D.C.'),fecha:val('#inf_f')||hoyISO(),cliente:{razon:c.razon,nit:c.nit},atn:atnV,vencimientos:venc,fechaRevision:val('#inf_r')||hoyISO(),impuestos:d.impuestos,docsExcel:d.docsExcel,docsOtros:d.docsOtros,secciones,porPagar});
-    try{const bytes=construirDocx(inf),corto=String(c.razon||'cliente').replace(/\b(S\.?A\.?S\.?|S\.?A\.?|LTDA\.?)\b/gi,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim().split(' ').slice(0,3).join('_'),per=periodoCortoES(periodoImp(d.secs[0].imp)).replace(/\s+/g,'_');
-      cerrar();await saveFile('Informe_Revision_impuestos_'+per+'_-_'+(corto||'cliente')+'.docx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
+    try{const bytes=construirDocx(inf),nombre=nombreArchivoInforme(c.razon,periodoImp(d.secs[0].imp));
+      cerrar();await saveFile(nombre,new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
     catch(e){console.error(e);toast('No pude generar el informe en Word.');}});
   setTimeout(()=>{const f=ov.querySelector('#inf_atn');if(f)f.focus();},0);
 }
@@ -14894,8 +14905,8 @@ function infConstruir(){
 async function infGenerar(){
   const r=infConstruir();if(r.err){toast(r.err);return;}const I=S.inf,c=cur();
   try{localStorage.setItem(INF_PIE_LS,I.pie||'');}catch(e){}
-  try{const bytes=construirDocx(r.inf),corto=String(c.razon||'cliente').replace(/\b(S\.?A\.?S\.?|S\.?A\.?|LTDA\.?)\b/gi,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim().split(' ').slice(0,3).join('_'),per=periodoLargoES((I.imps.find(i=>i.revisado)||{}).periodo).replace(/\s+/g,'_');
-    await saveFile('Informe_Revision_impuestos_'+per+'_-_'+(corto||'cliente')+'.docx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
+  try{const bytes=construirDocx(r.inf),nombre=nombreArchivoInforme(c.razon,(I.imps.find(i=>i.revisado)||{}).periodo);
+    await saveFile(nombre,new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
   catch(e){console.error(e);toast('No pude generar el informe en Word.');}}
 async function infAccion(a){
   const I=S.inf;if(!I)return;
