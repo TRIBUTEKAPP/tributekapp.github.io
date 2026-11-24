@@ -598,6 +598,7 @@ table.pend tr.pend-ok{opacity:.78}
 @media (max-width:640px){.inf-g{grid-template-columns:1fr}.inf-per,.inf-doc,.inf-dos{grid-template-columns:1fr}}
 /* Barra lateral: con el ítem «Informes» (cuatro ítems), espacios un poco más ajustados para que la barra no se desplace (pantallas altas aquí; las bajas, en la regla de max-height:779px) */
 @media (min-height:780px){.rail{gap:10px;padding-top:16px;padding-bottom:16px}.brandbox{padding-bottom:10px}.railacts{gap:6px}.nav-item{min-height:40px}}
+.inf-imp{margin:8px 0;padding:12px 14px;border-radius:var(--radius);border:1px solid var(--line);font-size:14px;line-height:1.5}.inf-imp.ok{background:var(--ok-bg);border-color:var(--ok)}.inf-imp.mal{background:var(--warn-bg);border-color:var(--warn)}.inf-imp-l{display:grid;gap:4px;margin-top:8px}.inf-imp-p{display:flex;gap:8px;align-items:center;margin:0;font-weight:600}
 
 </style>
 </head>
@@ -12079,6 +12080,33 @@ function repartirHallazgos(hallazgos,secciones){
   const res=(secciones||[]).map(()=>[]);if(!res.length)return res;
   for(const h of hallazgos||[])res[destinoHallazgo(h,secciones).k].push(h);
   return res;}
+/* Un informe ya hecho (Word o PDF): las personas de «Atn.» y los datos para confirmar que es del cliente (razón social y NIT que van debajo de «Señores:»). Solo eso: lo demás del informe no se toca. */
+async function docxParrafos(bytes){   // el texto de un Word (.docx), un párrafo por línea
+  const d=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes),ent=zipEntradas(d).find(x=>x.nombre==='word/document.xml');if(!ent)throw new Error('no es un Word');
+  const xml=new TextDecoder('utf-8').decode(await _leerTodo(_flujoEntrada(d,ent)));
+  return xml.split('</w:p>').map(p=>{let s='',m;const re=/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>|<w:br\s*\/>/g;while((m=re.exec(p)))s+=m[1]!=null?_ent(m[1]):' ';return s.replace(/\s+/g,' ').trim();}).filter(Boolean);}
+function extraerAtencionInforme(lineas){
+  const L=(lineas||[]).map(l=>String(l==null?'':l).replace(/\s+/g,' ').trim()).filter(Boolean),RX_ATN=/^atn\b\.?:?\s*/i,PARAR=/^(asunto|vencimientos?|revisi[oó]n|fecha|referencia|ref\b|ciudad|se[ñn]ores?|doctor|dra?\b|apreciad)/i,RX_NIT=/\b(?:NIT|N\.?\s?I\.?\s?T\.?)\s*[.:]?\s*(\d[\d.\s]*\d)(?:\s*[-–—]\s*(\d))?/i;
+  const iA=L.findIndex(l=>RX_ATN.test(l)),iS=L.findIndex(l=>/^se[ñn]ores?\b/i.test(l));
+  let razon='',nit='';const fin=iA>=0?iA:Math.min(L.length,(iS>=0?iS:0)+8);   // la razón social y el NIT van entre «Señores:» y «Atn.»
+  for(let k=iS>=0?iS+1:0;k<fin;k++){const l=L[k],m=RX_NIT.exec(l);if(m){if(!nit)nit=m[1].trim()+(m[2]?'-'+m[2]:'');continue;}if(!razon&&!/^se[ñn]ores?\b/i.test(l)&&!PARAR.test(l))razon=l;}
+  if(iA<0)return{err:'No encontré las personas de «Atn.» en ese informe.',razon,nit,personas:[]};
+  const sinPunto=s=>s.replace(/^[\s.,;:]+|[\s.,;:]+$/g,'').trim(),PART=/^(de|del|la|las|los|y|e|da|di|van|von|san)$/i,parece=t=>{if(!t||/\d/.test(t)||/:$/.test(t))return false;const w=t.split(' ');if(w.length>12)return false;if(/\s[–—-]\s|[–—]/.test(t))return /^\p{Lu}/u.test(t);return w.length<=6&&w.every(x=>PART.test(x)||/^\p{Lu}/u.test(x));};   // sin «Atn.»: con su cargo tras un guion, o un nombre corto con todas las palabras en mayúscula inicial (no una frase)
+  const partir=t=>{let m=/^(.*?)\s+[–—-]\s+(.+)$/.exec(t)||/^(.*?)\s*[–—]\s*(.+)$/.exec(t);return m?{nombre:sinPunto(m[1]),cargo:sinPunto(m[2])}:{nombre:sinPunto(t),cargo:''};};
+  const personas=[],vistos=new Set();
+  for(let k=iA;k<L.length;k++){const l=L[k],esAtn=RX_ATN.test(l);if(k>iA&&!esAtn&&PARAR.test(l))break;const t=l.replace(RX_ATN,'').trim();if(!t)continue;if(k>iA&&!esAtn&&!parece(t))break;
+    const p=partir(t);if(!p.nombre||!/\p{L}{2}/u.test(p.nombre)||/\d/.test(p.nombre))continue;const kn=_plN(p.nombre);if(vistos.has(kn))continue;vistos.add(kn);personas.push(p);}
+  return personas.length?{razon,nit,personas}:{err:'No encontré el nombre de ninguna persona en «Atn.».',razon,nit,personas:[]};}
+/* ¿El informe es del cliente? Por NIT (sin el dígito de verificación); si el informe no trae NIT, por el nombre (sin S.A.S., Ltda., acentos ni signos). Solo «coincide» y «nombre» permiten tomar las personas. */
+function validarClienteInforme(ext,cli){
+  const norm=s=>_plN(s).replace(/\b(s\s?a\s?s|s\s?a|ltda|e\s?u|y cia|sas)\b/g,' ').replace(/[^a-z0-9ñ ]+/g,' ').replace(/\s+/g,' ').trim(),nb=partirNit(ext&&ext.nit).base,cb=partirNit(cli&&cli.nit).base,rz=String((cli&&cli.razon)||'').trim();
+  if(nb&&cb){const f=x=>String(x).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+    return nb===cb?{ok:true,estado:'coincide',msg:'Es el informe de este cliente: el NIT coincide ('+f(nb)+').'}:{ok:false,estado:'noCoincide',msg:'Este informe es de otro cliente: dice «'+((ext&&ext.razon)||'sin nombre')+'» (NIT '+f(nb)+') y el cliente abierto es «'+rz+'» (NIT '+f(cb)+'). No se tomó nada.'};}
+  const a=norm(ext&&ext.razon).split(' ').filter(x=>x.length>2),b=norm(rz).split(' ').filter(x=>x.length>2);
+  if(!nb&&a.length&&b.length){const inter=a.filter(x=>b.includes(x)).length;if(inter/Math.min(a.length,b.length)>=0.8)return{ok:true,estado:'nombre',msg:'El informe no trae NIT, pero el nombre coincide con el del cliente («'+rz+'»).'};}
+  return{ok:false,estado:'indeterminado',msg:'No pude confirmar que sea el informe de este cliente: '+(nb?'el cliente abierto no tiene NIT para compararlo':'el informe no trae NIT ni un nombre parecido')+'. No se tomó nada.'};}
+/* Agrega a las personas actuales las nuevas que no estén ya (por nombre, sin importar tildes ni mayúsculas) */
+function combinarPersonas(actuales,nuevas){const out=(actuales||[]).map(p=>({nombre:p.nombre,cargo:p.cargo})),vistos=new Set(out.map(p=>_plN(p.nombre)));for(const p of nuevas||[]){const k=_plN(p.nombre);if(k&&!vistos.has(k)){vistos.add(k);out.push({nombre:p.nombre,cargo:p.cargo||''});}}return out;}
 
 
 
@@ -12463,7 +12491,7 @@ function xArt383(wb,d){
 }
 /* ---------- Informe al cliente en Word (.docx) ---------- */
 /* OOXML escrito a mano y ZIP sin comprimir (un Word de pocas páginas pesa poco): sin librerías ni red. Plantilla: carta de «Revisión de impuestos» (Letter, márgenes de 3 cm a los lados y 2,5 cm arriba y abajo,
-   Calibri 11, tabla de impuestos con encabezado azul, tablas de documentos con borde negro, hallazgos numerados, viñetas ✓ en los valores por pagar). Sin encabezado ni pie: no lleva logos ni datos de ninguna firma. */
+   Calibri Light 10, tabla de impuestos con encabezado azul, tablas de documentos con borde negro, hallazgos numerados, viñetas ✓ en los valores por pagar). Sin encabezado ni pie: no lleva logos ni datos de ninguna firma. */
 const _XE=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
 const _R=(t,o)=>{o=o||{};const pr=(o.font?`<w:rFonts w:ascii="${o.font}" w:hAnsi="${o.font}" w:eastAsia="${o.font}" w:cs="${o.font}"/>`:'')+(o.b?'<w:b/><w:bCs/>':'')+(o.i?'<w:i/><w:iCs/>':'')+(o.color?`<w:color w:val="${o.color}"/>`:'')+(o.sz?`<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>`:'');
   return`<w:r>${pr?`<w:rPr>${pr}</w:rPr>`:''}<w:t xml:space="preserve">${_XE(t)}</w:t></w:r>`;};
@@ -12546,7 +12574,7 @@ function construirDocx(inf){
   if(inf.porPagar.length){cuerpo.push(_P(_R('Valor por pagar:',{b:true}),{keep:true,antes:240,despues:120}));inf.porPagar.forEach(p=>cuerpo.push(_P(_R(p.texto,{b:true}),{num:1,despues:120})));}
   const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"',cab='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   const documento=`${cab}<w:document ${NS}><w:body>${cuerpo.join('')}<w:sectPr>${inf.pie?'<w:footerReference w:type="default" r:id="rIdPie"/>':''}<w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/></w:sectPr></w:body></w:document>`;
-  const estilos=`${cab}<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="es-CO" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
+  const estilos=`${cab}<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri Light" w:hAnsi="Calibri Light" w:eastAsia="Calibri Light" w:cs="Calibri Light"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="es-CO" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
   const numeracion=`${cab}<w:numbering ${NS}><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="✓"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr><w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol" w:cs="Segoe UI Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`;
   const tipos=`${cab}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${medios.some(m=>m.ext==='png')?'<Default Extension="png" ContentType="image/png"/>':''}${medios.some(m=>m.ext==='jpeg')?'<Default Extension="jpeg" ContentType="image/jpeg"/>':''}${medios.some(m=>m.ext==='emf')?'<Default Extension="emf" ContentType="image/x-emf"/>':''}${inf.pie?'<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>':''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
   const rels=`${cab}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
@@ -14791,6 +14819,7 @@ function viewInformes(){
       <div class="inf-decl" data-label="Declaración (PDF)">${decl}</div></div>`;};
   const docs=(t,k,l)=>`<h4 class="inf-sub">${t}</h4>${l.map((d,j)=>`<div class="inf-doc"><span>${esc(d.doc)}</span><input type="text" aria-label="Estado: ${esc(d.doc)}" data-inf="${k}.${j}.estado" value="${esc(d.estado)}"></div>`).join('')}`;
   const secsRev=I.imps.filter(i=>i.revisado).map(i=>({titulo:String(i.titulo||i.nombre).trim(),clave:i.nombre})),destino=h=>{if(!secsRev.length)return'';const d=destinoHallazgo(h,secsRev);return d.coincide?`<small class="hint" style="display:block;margin:2px 0 0 24px">Va en «${esc(secsRev[d.k].titulo)}»</small>`:`<small class="inf-mal" style="display:block;margin:2px 0 0 24px">Su impuesto («${esc(h.impuesto)}») no coincide con ninguno de los marcados: irá a «${esc(secsRev[0].titulo)}». Desmárcala o corrige el nombre en la planilla.</small>`;};
+  const M=I.imp,impHtml=!M?'':M.busy?`<p class="hint">Leyendo «${esc(M.archivo)}»…</p>`:`<div class="inf-imp ${M.ok?'ok':'mal'}" role="status"><b>«${esc(M.archivo)}»</b> · ${esc(M.msg)}${M.ok&&M.personas?`<div class="inf-imp-l">${M.personas.map((p,i)=>`<label class="inf-imp-p"><input type="checkbox" data-inf="imp.personas.${i}.incluir" ${p.incluir?'checked':''}><span>${esc(p.nombre)}${p.cargo?' – '+esc(p.cargo):''}</span></label>`).join('')}</div><div class="row" style="gap:8px;margin-top:8px"><button class="btn" type="button" data-ia="imp-reemplazar">${(c.atencion||[]).length?'Reemplazar las actuales':'Guardar en el perfil'}</button>${(c.atencion||[]).length?'<button class="btn ghost" type="button" data-ia="imp-agregar">Agregar a las actuales</button>':''}<button class="btn ghost" type="button" data-ia="imp-descartar">Descartar</button></div>`:`<div class="row" style="gap:8px;margin-top:8px">${M.otro?`<button class="btn" type="button" data-ia="imp-otro">Abrir ${esc(M.otro.razon||'ese cliente')}</button>`:''}<button class="btn ghost" type="button" data-ia="imp-descartar">Cerrar</button></div>`}</div>`;
   const P=I.plan,obsHtml=I.modo==='sin'?`<p class="hint" style="margin:10px 0 6px">Cada impuesto marcado sale con «Sin observaciones» y este párrafo (puedes editarlo):</p>
       <textarea rows="3" style="width:100%" aria-label="Párrafo de la revisión sin observaciones" data-inf="textoSin">${esc(I.textoSin)}</textarea>
       <label style="font-weight:400;display:block;margin:8px 0 0"><input type="checkbox" data-inf="revisoria" data-rr="1" ${I.revisoria?'checked':''}> La declaración se encuentra firmada por revisoría fiscal</label>`
@@ -14803,7 +14832,10 @@ function viewInformes(){
     <div class="inf-dos"><div><label for="inf_f">Fecha del informe</label><input type="date" id="inf_f" data-inf="fecha" value="${esc(I.fecha)}"></div><div><label for="inf_r">Fecha de revisión</label><input type="date" id="inf_r" data-inf="fechaRev" value="${esc(I.fechaRev)}"></div></div>
     <h4 class="inf-sub">Personas a quienes va dirigido (Atn.)</h4><p class="hint" style="margin:0 0 6px">Se escriben una sola vez: quedan guardadas en el perfil de este cliente y salen en cada informe (la primera con «Atn.»).</p>
     <div class="inf-pers">${(c.atencion||[]).map((p,i)=>`<div class="inf-per"><input type="text" aria-label="Nombre de la persona ${i+1}" data-atn="${i}.nombre" value="${esc(p.nombre)}" placeholder="Nombre y apellidos"><input type="text" list="inf_cargos" aria-label="Cargo de la persona ${i+1}" data-atn="${i}.cargo" value="${esc(p.cargo)}" placeholder="Cargo (Ej.: Representante Legal)"><button class="btn ghost" type="button" data-ia="atn-del:${i}" aria-label="Quitar a la persona ${i+1}">Quitar</button></div>`).join('')}</div>
-    <datalist id="inf_cargos">${INF_CARGOS.map(x=>`<option value="${esc(x)}">`).join('')}</datalist><div style="margin:6px 0 14px"><button class="btn ghost" type="button" data-ia="atn-add">Agregar persona</button></div>
+    <datalist id="inf_cargos">${INF_CARGOS.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <div class="row" style="gap:10px;align-items:center;margin:6px 0 4px"><button class="btn ghost" type="button" data-ia="atn-add">Agregar persona</button><label class="btn ghost file inf-sube"><span>Tomarlas de un informe ya hecho</span><input type="file" id="inf_imp" accept=".docx,.pdf" aria-label="Cargar un informe ya hecho para tomar las personas de Atn."></label></div>
+    <p class="hint" style="margin:0 0 8px">Sube un informe anterior (Word o PDF): se confirma que sea de este cliente y se toman solo las personas de «Atn.».</p>${impHtml}
+    <div style="margin:0 0 14px"></div>
     <label for="inf_pie">Pie de página (opcional: dirección y teléfono de tu firma)</label><input type="text" id="inf_pie" data-inf="pie" value="${esc(I.pie)}" placeholder="Ej.: Dirección: Calle 1 # 2 - 3 • Teléfono: 300 000 0000"></div>
     <div class="panel"><h3>Impuestos revisados y valor por pagar</h3><p class="hint">Marca los impuestos que revisaste. Carga la declaración en PDF (con texto) y el valor a pagar se lee solo; si es una imagen o un PDF escaneado, escríbelo.</p>
       <div class="inf-tabla" role="table"><div class="inf-g inf-cab" role="row" aria-hidden="true"><span>Impuesto</span><span>Periodicidad</span><span>Período</span><span>Vence</span><span>Valor por pagar</span><span>Declaración (PDF)</span></div>${I.imps.map((im,i)=>fila(i,im)).join('')}</div>
@@ -14812,13 +14844,15 @@ function viewInformes(){
     <div class="panel"><h3>Observaciones</h3><div class="inf-seg" role="group" aria-label="Tipo de informe"><button type="button" data-ia="modo-sin" aria-pressed="${I.modo==='sin'}">Sin observaciones</button><button type="button" data-ia="modo-con" aria-pressed="${I.modo==='con'}">Con observaciones</button></div>${obsHtml}</div>
     <div class="row" style="margin:14px 0"><button class="btn" type="button" data-ia="gen">Generar informe en Word</button></div>`;}
 function enlazarInformes(){
-  const m=document.getElementById('main');if(!m||!S.inf)return;
+  const m=document.getElementById('main');if(!m)return;
+  const sc0=m.querySelector('#inf_cli');if(sc0)sc0.addEventListener('change',()=>{if(sc0.value)infCambiarCliente(sc0.value);});   // el selector funciona también sin cliente abierto: elegirlo ya carga el informe
+  if(!S.inf)return;
   m.querySelectorAll('[data-inf]').forEach(el=>{const ev=el.type==='checkbox'||el.tagName==='SELECT'?'change':'input';el.addEventListener(ev,()=>{
     if(el.dataset.monto){const d=el.value.replace(/\D/g,'');infSet(el.dataset.inf,d);el.value=infFmtMonto(d);infTotalAct();return;}   // el monto se escribe con puntos de miles y se guarda solo con dígitos
     infSet(el.dataset.inf,el.type==='checkbox'?el.checked:el.value);if(el.dataset.rr)infRender();});});
-  const sc=m.querySelector('#inf_cli');if(sc)sc.addEventListener('change',()=>{if(sc.value)infCambiarCliente(sc.value);});
   m.querySelectorAll('[data-atn]').forEach(el=>el.addEventListener('input',()=>{const[i,k]=el.dataset.atn.split('.'),c=cur();if(c&&c.atencion&&c.atencion[+i]){c.atencion[+i][k]=el.value;infGuardarSoon();}}));   // las personas se guardan en el perfil del cliente
   m.querySelectorAll('[data-idecl]').forEach(el=>el.addEventListener('change',async()=>{const f=el.files&&el.files[0];if(f)await infLeerDeclaracion(+el.dataset.idecl,f);}));
+  const im=m.querySelector('#inf_imp');if(im)im.addEventListener('change',async()=>{const f=im.files&&im.files[0];if(f)await infLeerInforme(f);});
   const pl=m.querySelector('#inf_plan');if(pl)pl.addEventListener('change',async()=>{const f=pl.files&&pl.files[0];if(f)await infLeerPlanilla(f);});
   m.querySelectorAll('[data-ia]').forEach(b=>b.addEventListener('click',()=>infAccion(b.dataset.ia)));}
 async function infLeerDeclaracion(i,f){
@@ -14830,6 +14864,15 @@ async function infLeerDeclaracion(i,f){
   }catch(e){msg='No pude abrir el archivo (¿cargó el lector de PDF?): escribe el valor a pagar.';}
   if(r){im.valor=String(r.valor);im.revisado=true;im.decl={msg:'Leído de «'+f.name+'»: '+r.etiqueta+' (casilla '+r.casilla+')',ok:true};}else im.decl={msg,ok:false};
   infRender();}
+async function infLeerInforme(f){
+  const I=S.inf,c=cur();if(!I||!c)return;I.imp={archivo:f.name,busy:true};infRender();let L=[];const mal=m=>{I.imp={archivo:f.name,ok:false,msg:m};infRender();};
+  try{if(/\.pdf$/i.test(f.name))L=await pdfLines(f);else if(/\.docx$/i.test(f.name))L=await docxParrafos(new Uint8Array(await f.arrayBuffer()));else{mal('Sube el informe en Word (.docx) o en PDF.');return;}}
+  catch(e){mal(/\.pdf$/i.test(f.name)?'No pude abrir el PDF (¿cargó el lector de PDF?).':'No pude abrir el Word: guárdalo de nuevo como .docx o súbelo en PDF.');return;}
+  if(!L.length){mal('El archivo no tiene texto que pueda leer (¿es un PDF escaneado?).');return;}
+  const ext=extraerAtencionInforme(L),val=validarClienteInforme(ext,c);
+  if(!val.ok){const nb=ext.nit?nitBase(ext.nit):'',otro=nb?S.clients.find(x=>x.id!==c.id&&!x._new&&nitBase(x.nit)===nb):null;I.imp={archivo:f.name,ok:false,msg:val.msg,otro:otro?{id:otro.id,razon:otro.razon}:null};infRender();return;}
+  if(ext.err){I.imp={archivo:f.name,ok:false,msg:val.msg+' Pero '+ext.err.charAt(0).toLowerCase()+ext.err.slice(1)};infRender();return;}
+  I.imp={archivo:f.name,ok:true,msg:val.msg,personas:ext.personas.map(p=>Object.assign({},p,{incluir:true}))};infRender();}
 async function infLeerPlanilla(f){
   const I=S.inf;I.plan={archivo:f.name,busy:true};infRender();let r=null;
   try{if(!window.ExcelJS)throw new Error('sin ExcelJS');r=await leerPlanillaConImagenes(window.ExcelJS,await f.arrayBuffer());}
@@ -14859,6 +14902,10 @@ async function infAccion(a){
   const c=cur();
   if(a==='atn-add'&&c){(c.atencion=c.atencion||[]).push({nombre:'',cargo:''});await persist(c);infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
   else if(/^atn-del:\d+$/.test(a)&&c){c.atencion.splice(+a.slice(8),1);await persist(c);infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
+  else if((a==='imp-reemplazar'||a==='imp-agregar')&&c&&I.imp&&I.imp.personas){const nuevas=I.imp.personas.filter(p=>p.incluir).map(p=>({nombre:p.nombre,cargo:p.cargo}));if(!nuevas.length){toast('Marca al menos una persona.');return;}
+    c.atencion=a==='imp-agregar'?combinarPersonas(c.atencion,nuevas):nuevas;await persist(c);I.imp=null;infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
+  else if(a==='imp-descartar'){I.imp=null;infRender();}
+  else if(a==='imp-otro'&&I.imp&&I.imp.otro){await infCambiarCliente(I.imp.otro.id);}
   else if(a==='modo-sin'||a==='modo-con'){I.modo=a==='modo-sin'?'sin':'con';infRender();}
   else if(a==='quitar-plan'){I.plan=null;infRender();}
   else if(a==='plantilla'){if(!window.ExcelJS){toast('No cargó la librería de Excel; vuelve a intentarlo con conexión a internet.');return;}
