@@ -599,6 +599,15 @@ table.pend tr.pend-ok{opacity:.78}
 /* Barra lateral: con el ítem «Informes» (cuatro ítems), espacios un poco más ajustados para que la barra no se desplace (pantallas altas aquí; las bajas, en la regla de max-height:779px) */
 @media (min-height:780px){.rail{gap:10px;padding-top:16px;padding-bottom:16px}.brandbox{padding-bottom:10px}.railacts{gap:6px}.nav-item{min-height:40px}}
 .inf-imp{margin:8px 0;padding:12px 14px;border-radius:var(--radius);border:1px solid var(--line);font-size:14px;line-height:1.5}.inf-imp.ok{background:var(--ok-bg);border-color:var(--ok)}.inf-imp.mal{background:var(--warn-bg);border-color:var(--warn)}.inf-imp-l{display:grid;gap:4px;margin-top:8px}.inf-imp-p{display:flex;gap:8px;align-items:center;margin:0;font-weight:600}
+.aviso-cuentas{margin:10px 0;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--line);font-size:14px;line-height:1.5}.aviso-cuentas.ok{background:var(--soft);border-color:var(--accent)}.aviso-cuentas.mal{background:var(--warn-bg);border-color:var(--warn)}
+/* Control de informes del mes */
+.inf-tabs{margin:0 0 12px}.inf-ctl-g{display:grid;grid-template-columns:minmax(150px,220px) minmax(150px,200px) 1fr;gap:12px;align-items:end}.inf-ctl-g input,.inf-ctl-g select{width:100%;min-width:0}
+.ctl-bar{display:grid;grid-template-columns:minmax(150px,220px) minmax(180px,1fr) auto;gap:12px;align-items:end;margin-bottom:12px}.ctl-bar input,.ctl-bar select{width:100%;min-width:0}
+.ctl-resumen{font-size:15px;margin:6px 0 8px}.ctl-barra{height:10px;border-radius:999px;background:var(--soft);border:1px solid var(--line);margin-top:6px;overflow:hidden}.ctl-barra i{display:block;height:100%;background:var(--ok);transition:width .2s}
+.ctl-tabla{display:grid;gap:8px;margin-top:8px}.ctl-fila{display:grid;grid-template-columns:minmax(200px,2fr) minmax(190px,1.4fr) auto;gap:12px;align-items:center;padding:10px 14px;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:var(--radius);background:var(--surface)}.ctl-fila.on{border-left-color:var(--ok);background:var(--ok-bg)}
+.ctl-cli{display:flex;flex-direction:column;min-width:0}.ctl-cli b{overflow-wrap:anywhere}.ctl-cli small{color:var(--muted)}.ctl-est{display:flex;flex-direction:column;gap:4px;align-items:flex-start}.ctl-acc{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:900px){.inf-ctl-g,.ctl-bar{grid-template-columns:1fr}.ctl-fila{grid-template-columns:1fr}}
+.ctl-bar input[type=search]{font:inherit;padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);box-sizing:border-box;min-height:42px}.ctl-bar select{min-height:42px}
 
 </style>
 </head>
@@ -1453,6 +1462,8 @@ function msg(codigo, vars) {
    24 · Informe al cliente (carta de revisión de impuestos)
    25 · Planilla de hallazgos para el informe
    26 · Espacio de informes: valor de la declaración, planilla con imágenes y secciones
+   27 · Cuentas de retención distintas de las estándar (por cliente)
+   28 · Control de informes realizados (por cliente y mes)
 */
 /* ===== Motor de validación (funciones puras) ===== */
 /* ########## SECCIÓN 1 · Conceptos, cuentas por defecto y utilidades de números y texto ########## */
@@ -12118,6 +12129,67 @@ function nombreArchivoInforme(razon,periodo){
   if(/^(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA\.?|E\.?\s?U\.?)$/i.test(cli))cli='';   // un «nombre» que es solo la sociedad no es un nombre
   if(cli.length>60)cli=cli.slice(0,60).replace(/\s+\S*$/,'').trim();cli=cli.replace(/[\s.]+$/,'');
   return(num?num+'. ':'')+'Revisión de impuestos'+(mes?' '+mes:'')+' - '+(cli||'Cliente')+'.docx';}
+/* ########## SECCIÓN 27 · Cuentas de retención distintas de las estándar (por cliente) ########## */
+/* Algunos clientes llevan la retención en la fuente en la 2465, el IVA retenido en la 2467 y la retención de ICA en la 2468 (en vez de 2365, 2367 y 2368). La app trabaja por dentro con las estándar (como ya hace con el PUC de salud):
+   al leer los archivos de ese cliente, el código de cuenta se cambia a la estándar SOLO donde es una cuenta (la columna de cuentas o un texto «24650501 - Servicios»); un NIT o una cédula que empiece por 2465 no se toca. */
+const CTA_RET_STD={rtf:'2365',iva:'2367',ica:'2368'};
+function mapaAliasCuentas(c){const m={},CAMPO={rtf:'ctaRetRtf',iva:'ctaRetIva',ica:'ctaRetIca'};for(const k of ['rtf','iva','ica']){const raw=c?c[CAMPO[k]]:null,v=String(raw==null?'':raw).replace(/\D/g,'');if(/^\d{4}$/.test(v)&&v!==CTA_RET_STD[k]&&!Object.values(CTA_RET_STD).includes(v)&&!m[v])m[v]=CTA_RET_STD[k];}return m;}   // {'2465':'2365','2468':'2368'}; vacío si el cliente usa las estándar
+function aliasEnCodigo(v,m){if(v==null||!m)return v;const s=String(v).trim();if(!/^\d{4,12}$/.test(s))return v;const p=m[s.slice(0,4)];return p?(typeof v==='number'?Number(p+s.slice(4)):p+s.slice(4)):v;}
+const _RX_ENC_CTA=/^\s*(cuenta|cuenta\s*-\s*c[oó]d\.?|c[oó]d\.?\s*cuenta|c[oó]digo|c[oó]digo\s*cuenta|c[oó]digo\s*contable|cta\.?|n[uú]mero\s*de\s*cuenta|cuenta\s*contable)\s*$/i;
+/* Cambia a las cuentas estándar las celdas que son cuentas del cliente. Devuelve las mismas filas (sin copiar) si no hay nada que cambiar */
+function aplicarAliasFilas(rows,m){
+  if(!rows||!m||!Object.keys(m).length)return rows;const cols=new Set(),pre=Object.keys(m).join('|'),rxTxt=new RegExp('^(\\s*(?:total(?:\\s+para)?\\s+)?)('+pre+')(\\d{0,8})(?=\\s*[-–—]\\s*\\S|\\s+[^\\d\\s])','i');
+  for(const r of rows)if(r)for(let j=0;j<r.length;j++)if(typeof r[j]==='string'&&_RX_ENC_CTA.test(r[j]))cols.add(j);
+  let cambio=false;const out=rows.map(r=>{if(!r)return r;let c=null;
+    for(let j=0;j<r.length;j++){const v=r[j];let n=v;
+      if(typeof v==='string'){const t=rxTxt.exec(v);if(t)n=v.replace(rxTxt,(x,a,p,d)=>a+m[p]+d);else if(cols.has(j))n=aliasEnCodigo(v,m);}
+      else if(typeof v==='number'&&cols.has(j))n=aliasEnCodigo(v,m);
+      if(n!==v){if(!c)c=r.slice();c[j]=n;}}
+    if(c){cambio=true;return c;}return r;});
+  return cambio?out:rows;}
+/* ¿Trae el archivo las cuentas 2465, 2467 o 2468 y ninguna 2365, 2367 o 2368? (para avisar que el cliente usa otras cuentas de retención). Devuelve {alias:{'2465':n,…}} o null */
+function detectarAliasCuentas(rows){
+  const cols=new Set(),A={'2465':0,'2467':0,'2468':0};let std=0;
+  for(const r of rows||[])if(r)for(let j=0;j<r.length;j++)if(typeof r[j]==='string'&&_RX_ENC_CTA.test(r[j]))cols.add(j);
+  const ver=s=>{const t=/^\s*(?:total(?:\s+para)?\s+)?(\d{4})(\d{0,8})(?=\s*[-–—]\s*\S|\s+[^\d\s]|$)/i.exec(s);return t?t[1]:null;};
+  for(const r of rows||[])if(r)for(let j=0;j<r.length;j++){const v=r[j];let p=null;
+    if(typeof v==='string'){const s=v.trim();if(cols.has(j)&&/^\d{4,12}$/.test(s))p=s.slice(0,4);else if(/^\s*(?:total(?:\s+para)?\s+)?\d{6,12}\s*[-–—]\s*\S|^\s*\d{6,12}\s+\D/i.test(s))p=ver(s);}
+    else if(typeof v==='number'&&cols.has(j)&&v>=1e7&&v<1e12)p=String(v).slice(0,4);
+    if(p){if(A[p]!=null)A[p]++;else if(p==='2365'||p==='2367'||p==='2368')std++;}}
+  const n=A['2465']+A['2467']+A['2468'];return n>0&&std===0?{alias:A,n}:null;}
+/* El cliente con sus cuentas de pago y su tabla de cuentas en la numeración estándar (para que las reglas las reconozcan) */
+function clienteConAlias(c,m){if(!c||!m||!Object.keys(m).length)return c;const o=Object.assign({},c);
+  for(const k of ['ctaPago','ctaPagoRica'])if(o[k]!=null)o[k]=String(aliasEnCodigo(String(o[k]).trim(),m));
+  if(Array.isArray(o.rules))o.rules=o.rules.map(r=>Object.assign({},r,{p:String(aliasEnCodigo(String(r.p==null?'':r.p).trim(),m))}));return o;}
+/* Un texto con cuentas estándar («cuentas 2365 y 2367») con las del cliente («cuentas 2465 y 2467») */
+function invertirAliasTexto(txt,c){const m=mapaAliasCuentas(c),inv={};for(const k of Object.keys(m))inv[m[k]]=k;return Object.keys(inv).length?String(txt==null?'':txt).replace(/(?<![\d.,])(2365|2367|2368)(\d{0,6})(?![\d])(?![.,]\d)/g,(x,p,d)=>(inv[p]||p)+d):txt;}
+function textoAliasCuentas(c){const m=mapaAliasCuentas(c),L=Object.keys(m).sort();return L.length?L.join(', ').replace(/, ([^,]*)$/,' y $1')+' se leen como '+L.map(x=>m[x]).join(', ').replace(/, ([^,]*)$/,' y $1'):'';}   // «2465 y 2468 se leen como 2365 y 2368»
+/* Balance «con terceros» de algunos programas: debajo de cada cuenta de último nivel van las filas de cada tercero (cédula o NIT en la misma columna de cuentas), así que los terceros se repiten bajo varias cuentas.
+   Se separan solo si el balance tiene la jerarquía completa (cada cuenta de 1, 2 o 4 dígitos con su cuenta madre) y hay terceros repetidos bajo varias cuentas: una fila de 5 o más dígitos sin su cuenta madre (la de 2 dígitos menos; los niveles del PUC son 1, 2, 4, 6, 8 y 10) es un tercero. Si no hay esa evidencia, no se toca nada. */
+function separarTercerosEnBalance(rows){
+  const cod=r=>String(r.cta==null?'':r.cta),set=new Set(rows.map(cod)),padre=c=>c.length<=1?'':c.length===2?c.slice(0,1):c.slice(0,c.length-2);
+  let tot=0,ok=0;for(const r of rows){const c=cod(r);if(c.length>4||!/^\d+$/.test(c))continue;tot++;if(c.length<=1||set.has(padre(c)))ok++;}
+  if(tot<20||ok/tot<0.95)return null;
+  const sep=[],cuentas=[];for(const r of rows){const c=cod(r);if(c.length>=5&&/^\d+$/.test(c)&&!set.has(padre(c)))sep.push(r);else cuentas.push(r);}
+  const cuenta=new Map();for(const r of sep)cuenta.set(cod(r),(cuenta.get(cod(r))||0)+1);const rep=[...cuenta.values()].filter(n=>n>1).length;
+  if(sep.length<20||rep<10)return null;
+  return{rows:cuentas,separados:sep.length,terceros:cuenta.size};}
+/* ########## SECCIÓN 28 · Control de informes realizados (por cliente y mes) ########## */
+/* Para llevar el control de qué clientes ya tienen hecho el informe de la revisión de un mes: cada cliente guarda en su perfil, por mes («2026-10»), que el informe está hecho, la fecha y una nota. */
+function mesDelPeriodo(p){const s=String(p||'');let m=/^(\d{4})-(0[1-9]|1[0-2])$/.exec(s);if(m)return s;m=/^(\d{4})-B([1-6])$/.exec(s);if(m)return m[1]+'-'+String(2*+m[2]).padStart(2,'0');m=/^(\d{4})$/.exec(s);return m?m[1]+'-12':'';}   // el mes del informe de un período: el mes, el último mes del bimestre o diciembre del año
+function fechaDMA(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));return m?m[3]+'/'+m[2]+'/'+m[1]:'';}
+function ultimosMeses(n,desde){const m=/^(\d{4})-(\d{2})/.exec(String(desde||''));let y=m?+m[1]:new Date().getFullYear(),mm=m?+m[2]:new Date().getMonth()+1;const out=[];for(let i=0;i<n;i++){out.push(y+'-'+String(mm).padStart(2,'0'));mm--;if(mm<1){mm=12;y--;}}return out;}
+function informeHecho(c,mes){const x=c&&c.informesHechos&&typeof c.informesHechos==='object'?c.informesHechos[mes]:null;return x&&x.hecho?x:null;}
+function marcarInforme(c,mes,fecha,nota){if(!c||!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mes)))return false;if(!c.informesHechos||typeof c.informesHechos!=='object'||Array.isArray(c.informesHechos))c.informesHechos={};c.informesHechos[mes]={hecho:true,fecha:/^\d{4}-\d{2}-\d{2}$/.test(String(fecha||''))?String(fecha):'',nota:String(nota==null?'':nota).trim()};return true;}
+function quitarMarcaInforme(c,mes){if(c&&c.informesHechos&&typeof c.informesHechos==='object'&&c.informesHechos[mes]){delete c.informesHechos[mes];return true;}return false;}
+/* El tablero del mes: todos los clientes guardados con su estado; «filtro»: todos, pendientes o realizados; «q» busca por nombre o NIT. El resumen cuenta todos los clientes (no solo los que se ven). */
+function controlInformes(clientes,mes,filtro,q){
+  const n=s=>_plN(s),qq=n(q||'').trim(),dq=qq.replace(/\D/g,'');
+  const todos=(clientes||[]).filter(c=>c&&!c._new).map(c=>{const m=informeHecho(c,mes);return{id:c.id,razon:String(c.razon||'(sin nombre)'),nit:String(c.nit||''),hecho:!!m,fecha:m?m.fecha||'':'',nota:m?m.nota||'':''};}).sort((a,b)=>a.razon.localeCompare(b.razon,'es'));
+  const hechos=todos.filter(x=>x.hecho).length;let rows=todos;
+  if(filtro==='pendientes')rows=rows.filter(x=>!x.hecho);else if(filtro==='realizados')rows=rows.filter(x=>x.hecho);
+  if(qq)rows=rows.filter(x=>n(x.razon).includes(qq)||(dq.length>=3&&x.nit.replace(/\D/g,'').includes(dq)));
+  return{rows,total:todos.length,hechos,pendientes:todos.length-hechos,pct:todos.length?Math.round(hechos/todos.length*100):0};}
 
 
 
@@ -12615,7 +12687,7 @@ function xBalance(wb,d){
   const f2=n=>String(n).padStart(2,'0');
   ws.getCell('B1').value='MAYOR Y BALANCES ';ws.getCell('B1').font=xf({bold:true});
   ws.getCell('B2').value='Movimientos entre 1/'+f2(mI)+'/'+yI+' y '+ult+'/'+f2(m)+'/'+y;ws.getCell('B2').font=xf({});
-  ws.getCell('B3').value='NIIF - (En unidades monetarias con 2 decimales, pesos)'+(d.balNota||' · cuentas 2365 y 2367');ws.getCell('B3').font=xf({});
+  ws.getCell('B3').value='NIIF - (En unidades monetarias con 2 decimales, pesos)'+invertirAliasTexto(d.balNota||' · cuentas 2365 y 2367',d.client);ws.getCell('B3').font=xf({});
   const G={font:xf({bold:true}),fill:xfill(XC.silver)};
   box(ws,5,1,6,6,G);
   ws.getCell('C5').value='Saldo anterior';ws.getCell('D5').value='Movimiento';ws.getCell('F5').value='Saldo';
@@ -12798,7 +12870,7 @@ function xObs(wb,d){
   ws.columns=[{width:3.7},{width:22.9},{width:12},{width:11.4},{width:11.4},{width:11.4},{width:11.4},{width:11.4},{width:11.4},{width:11.4},{width:11.4},{width:14},{width:30},{width:2.1},{width:8}];
   const c=d.client,B=xf({bold:true}),VAL={font:xf({bold:true,color:{argb:XC.white}}),fill:xfill(XC.indigo),alignment:{horizontal:'center'},border:BOX};
   ws.getCell('N2').value='X';ws.getCell('N2').font=xf({bold:true,color:{argb:XC.red}});ws.getCell('O2').value=codigoPapel(d.meta.corte,d.period);ws.getCell('O2').font=xf({bold:true,color:{argb:XC.red}});
-  [['CLIENTE:',(c.razon||'').toUpperCase()],['TIPO DE VISITA:','REVISIÓN IMPUESTOS'],['ANEXO','CHECK LIST '],['CUENTA ANALIZADA:',d.cuentaAnalizada||'2365 - 2367'],['FECHA DE CORTE:',isoDate(d.meta.corte)||'']].forEach((f,i)=>{
+  [['CLIENTE:',(c.razon||'').toUpperCase()],['TIPO DE VISITA:','REVISIÓN IMPUESTOS'],['ANEXO','CHECK LIST '],['CUENTA ANALIZADA:',invertirAliasTexto(d.cuentaAnalizada||'2365 - 2367',c)],['FECHA DE CORTE:',isoDate(d.meta.corte)||'']].forEach((f,i)=>{
     const r=3+i;ws.getCell(r,2).value=f[0];ws.getCell(r,2).font=B;merged(ws,r,4,r,10,f[1],VAL);if(i===4)ws.getCell(r,4).numFmt=XDATE;});
   [['SOCIO',c.socio,4],['ENCARGADO',c.encargado,5],['AUDITOR',c.auditor,6]].forEach(([t,v,r])=>{const a=ws.getCell(r,12);a.value=t;a.font=xf({bold:true,color:{argb:XC.white}});a.fill=xfill(XC.indigo);a.alignment={horizontal:'right'};
     const b=ws.getCell(r,13);b.value=(v||'').toUpperCase();b.font=B;b.fill=xfill(XC.silver);});
@@ -13370,7 +13442,7 @@ const ICA_DEF={icaTarifa:'9.66',icaTarifaAnterior:'',icaActividad:'',icaAvisos:'
 /* Programas contables del selector del perfil: «Detectar automáticamente» y los adaptadores (los que aún no tienen lector se marcan) */
 const SOFTWARE_OPTS=[{v:'',t:'Detectar automáticamente'}].concat(ADAPTADORES.map(a=>({v:a.id,t:a.nombre+(a.estado==='esqueleto'?' (aún sin lector)':'')})));
 function newClient(){return{...ICA_DEF,id:'c'+Date.now().toString(36),razon:'',nit:'',socio:'',encargado:'',auditor:'',atencion:[],tipo:'Persona jurídica',iva:'',periodicidad:'Bimestral',software:'',
-  granContrib:'No',municipio:'Bogotá D.C.',icaRegimen:'No',agenteReteICA:'No',ctaPagoRica:'236899',uvtEspecial:0,tol:1000,ctaPago:'236575',gasto:'51,52,61,62,71,72,73,28',gastoExcl:'5105,5115,5160',omitUvt:10,omitModo:'Tabla 2026 por concepto',exentos:'',tarifaEsp:'',tipoPersona:'',fijos:'',notas:'',rules:clone(DEFAULT_RULES),periods:{},_new:true};}
+  granContrib:'No',municipio:'Bogotá D.C.',icaRegimen:'No',agenteReteICA:'No',ctaPagoRica:'236899',ctaRetRtf:'2365',ctaRetIva:'2367',ctaRetIca:'2368',informesHechos:{},uvtEspecial:0,tol:1000,ctaPago:'236575',gasto:'51,52,61,62,71,72,73,28',gastoExcl:'5105,5115,5160',omitUvt:10,omitModo:'Tabla 2026 por concepto',exentos:'',tarifaEsp:'',tipoPersona:'',fijos:'',notas:'',rules:clone(DEFAULT_RULES),periods:{},_new:true};}
 function pkeyAct(){return S.imp==='retefuente'?S.period:S.imp+':'+(S.per[S.imp]||'sin-periodo');}
 function pdata(){const c=cur();const k=pkeyAct();return c.periods[k]=c.periods[k]||{meta:{visita:'',corte:'',prevDecl:''},ck:{},summary:null,ranAt:null};}
 function periodosActual(c){return S.imp==='retefuente'?[]:periodosImp(c,allCals(),S.imp);}
@@ -13393,7 +13465,7 @@ async function persist(c){
   if(S.db){try{const o=clone(c);delete o._new;await S.db.doc('clients/'+c.id).set(o);}catch(e){toast('No pude guardar en el espacio compartido; quedó en este navegador.');}}
 }
 let tmr=null;function persistSoon(){clearTimeout(tmr);tmr=setTimeout(()=>{const c=cur();if(c)persist(c);},600);}
-function migrate(c){if(!Array.isArray(c.atencion))c.atencion=[];if(c.software==null)c.software='';else if(c.software&&!adaptadorPor(c.software)){const id=softwareDesdeTexto(c.software);if(id)c.software=id;else{c.softwareTxt=c.software;c.software='';}}   // el texto libre de versiones anteriores pasa a un programa de la lista (o se conserva aparte)
+function migrate(c){if(!Array.isArray(c.atencion))c.atencion=[];if(!c.informesHechos||typeof c.informesHechos!=='object'||Array.isArray(c.informesHechos))c.informesHechos={};if(c.ctaRetRtf==null)c.ctaRetRtf='2365';if(c.ctaRetIva==null)c.ctaRetIva='2367';if(c.ctaRetIca==null)c.ctaRetIca='2368';if(c.software==null)c.software='';else if(c.software&&!adaptadorPor(c.software)){const id=softwareDesdeTexto(c.software);if(id)c.software=id;else{c.softwareTxt=c.software;c.software='';}}   // el texto libre de versiones anteriores pasa a un programa de la lista (o se conserva aparte)
   for(const [k,v] of Object.entries(ICA_DEF))if(c[k]==null)c[k]=v;if(!c.rules)return;if(c.municipio==null)c.municipio='Bogotá D.C.';if(c.icaRegimen==null)c.icaRegimen='No';if(c.agenteReteICA==null)c.agenteReteICA='No';if(c.ctaPagoRica==null)c.ctaPagoRica='236899';if(!['Bimestral','Cuatrimestral','No presenta'].includes(c.periodicidad))c.periodicidad='Bimestral';if(c.granContrib==null)c.granContrib='No';if(c.uvtEspecial==null)c.uvtEspecial=(c.uvt&&+c.uvt!==52374)?+c.uvt:0;   // la UVT ya no se guarda por cliente: una UVT distinta a la oficial pasa a «especial»
   const conBal=!!(c.ctasBalance&&c.ctasBalance.ctas&&c.ctasBalance.ctas.length);   // con un balance cargado, las filas que no aparecen en él se quitaron a propósito: no se reponen
   if(!conBal)[['236703','IVA 132'],['236704','IVA 131']].forEach(([p,k])=>{if(!c.rules.some(r=>String(r.p)===p))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='2367')),0,{p,c:k,m:0});});c.rules.forEach(r=>{if(r.c==='RTE IVA')r.c='IVA 131';if(r.c==='EXTERIOR')r.c='EXTERIOR SIN CONVENIO';});if(c.tarifaEsp==null)c.tarifaEsp='';if(c.tipoPersona==null)c.tipoPersona='';if(!conBal&&!c.rules.some(r=>String(r.p)==='23653001'))c.rules.splice(Math.max(0,c.rules.findIndex(r=>String(r.p)==='236530')),0,{p:'23653001',c:'ARRENDAMIENTOS',m:0});}
@@ -13421,7 +13493,13 @@ function recortarHoja(ws){
   let r2=-1,c2=-1;for(const k in ws){if(k.charCodeAt(0)===33)continue;const m=/^([A-Z]+)(\d+)$/.exec(k);if(!m)continue;const c=XLSX.utils.decode_col(m[1]),r=+m[2]-1;if(r>r2)r2=r;if(c>c2)c2=c;}
   if(r2>=0)ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:r2,c:Math.max(c2,0)}});return ws;
 }
+/* Los archivos de un cliente que lleva la retención en otras cuentas (2465, 2467, 2468) se leen con las cuentas estándar; si el cliente no lo tiene configurado y el archivo trae esas cuentas, se avisa */
 async function readSheets(f){
+  const sh=await readSheetsCrudo(f),c=cur(),m=mapaAliasCuentas(c);
+  if(Object.keys(m).length)return sh.map(s=>s&&s.rows?Object.assign({},s,{rows:aplicarAliasFilas(s.rows,m)}):s);
+  if(c&&!/\.(pdf)$/i.test(f.name))for(const s of sh){const d=s&&s.rows?detectarAliasCuentas(s.rows):null;if(d){S.aliasAviso={cid:c.id,archivo:f.name,alias:d.alias};break;}}
+  return sh;}
+async function readSheetsCrudo(f){
   const buf=await f.arrayBuffer();
   if(/\.(xlsx|xlsm)$/i.test(f.name)&&xlsxPesado(buf)){   // libro con hojas «infladas» (cientos de miles de filas vacías con formato): se lee en flujo y solo lo que tiene datos
     if(typeof DecompressionStream==='undefined'||typeof ReadableStream==='undefined')throw Object.assign(new Error('pesado'),{pesado:true});
@@ -13640,12 +13718,13 @@ async function loadSlot(k,files,opc){
     try{const lines=await pdfLines(files[0]);pdfRes=lines.length?leerBalancePdf(lines,sw):{err:mt('LEC-PDF-001')};}
     catch(e){pdfRes={err:'No pude abrir el PDF (el lector de PDF no cargó). Sube el balance en Excel.'};}
     if(pdfRes.err){DD[k]={names,err:pdfRes.err};return;}
+    {const mP=mapaAliasCuentas(cur());if(Object.keys(mP).length&&pdfRes&&pdfRes.rows)pdfRes.rows=pdfRes.rows.map(r=>Object.assign({},r,{cta:String(aliasEnCodigo(r.cta,mP))}));}   // balance en PDF de un cliente con otras cuentas de retención
     const ctP=contrato('bal',pdfRes);if(!ctP.ok){DD[k]={names,err:ctP.err};return;}
     DD[k]={names,parsed:pdfRes,info:pdfRes.rows.length.toLocaleString('es-CO')+' cuentas leídas del PDF'+(pdfRes.leidoComo?' · OJO: Leído como '+pdfRes.leidoComo+'; tu perfil dice '+pdfRes.perfilDice:'')+(ctP.avisos.length?' · OJO: '+ctP.avisos.join(' · '):''),warn:ctP.avisos.length>0||!!pdfRes.leidoComo};return;
   }
   const porArchivo=[];
   try{for(const f of files){names.push(f.name);let sh;
-    if(k==='led'&&/\.pdf$/i.test(f.name)){const fl=filasDeLibroAuxiliarPdf(await pdfLines(f));if(!fl){DD[k]={names,err:'Leí el PDF, pero no es un «Libro Auxiliar» (Tercero, Fecha, Nota, Doc. #, Débitos, Créditos y Saldo por cuenta). Súbelo en Excel o carga el libro correcto.'};return;}sh=[{name:'PDF',rows:fl.rows}];}   // el auxiliar en PDF se vuelve las mismas filas del Excel
+    if(k==='led'&&/\.pdf$/i.test(f.name)){const fl=filasDeLibroAuxiliarPdf(await pdfLines(f));if(!fl){DD[k]={names,err:'Leí el PDF, pero no es un «Libro Auxiliar» (Tercero, Fecha, Nota, Doc. #, Débitos, Créditos y Saldo por cuenta). Súbelo en Excel o carga el libro correcto.'};return;}sh=[{name:'PDF',rows:aplicarAliasFilas(fl.rows,mapaAliasCuentas(cur()))}];}   // el auxiliar en PDF se vuelve las mismas filas del Excel
     else sh=await readSheets(f);
     porArchivo.push(sh);all.push(...sh);}}catch(e){DD[k]={names,err:e&&e.pesado?'Este archivo es demasiado pesado para abrirlo en este navegador: Excel guardó cientos de miles de filas vacías. Ábrelo en Excel, borra las filas y columnas sobrantes (Ctrl+Fin te lleva al final real) y guárdalo de nuevo.':'No pude leer el archivo. Verifica que sea Excel (.xlsx, .xls) o CSV.'};return;}
   const cmpK=(a,b)=>{for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1;}return 0;};
@@ -13659,7 +13738,10 @@ async function loadSlot(k,files,opc){
     if(mv.length&&mv.every(Boolean)){const partes=prev.concat(mv),x=partes.length>1?unirMovimientos(partes):Object.assign({},partes[0]);x.partesInf=partes;return x;}
     return null;})():null;
   let r;
-  if(k==='bal'){const corteP=S.imp==='reteica'?(bimInfo(S.per&&S.per.reteica)||{}).fin:S.imp==='retefuente'?S.period:'';r=tryEach(rows=>leerBalance(rows,sw),x=>[corteP&&x.corte===corteP?1:0]);
+  if(k==='bal'){const corteP=S.imp==='reteica'?(bimInfo(S.per&&S.per.reteica)||{}).fin:S.imp==='retefuente'?S.period:'';const dupBal=x=>{const s=new Set();for(const a of x.rows){if(s.has(a.cta))return true;s.add(a.cta);}return false;};   // entre las hojas de un libro, la que no repite códigos (el balance «con terceros» repite cada cuenta) gana a la que sí
+    const rxF=S.imp==='reteica'?/^2368/:S.imp==='retefuente'?/^2365/:null,tieneCtaFlujo=x=>!rxF||x.rows.some(a=>rxF.test(a.cta));   // primero la hoja que trae las cuentas del impuesto que se revisa (2368 para ReteICA, 2365 para retención en la fuente)
+    r=tryEach(rows=>leerBalance(rows,sw),x=>[corteP&&x.corte===corteP?1:0,tieneCtaFlujo(x)?1:0,dupBal(x)?0:1]);
+    if(r&&r.rows&&!r.err){const st=separarTercerosEnBalance(r.rows);if(st)r=Object.assign({},r,{rows:st.rows,tercerosBalance:st.separados,formato:(r.formato?r.formato+' · ':'')+'balance con terceros: se usaron las cuentas y se separaron '+st.separados.toLocaleString('es-CO')+' filas de '+st.terceros.toLocaleString('es-CO')+' terceros'});}   // las filas de terceros no son cuentas
     // si el balance solo trae el movimiento neto y el mismo libro trae el movimiento por cuenta, los débitos y créditos salen de allí (y el movimiento queda cargado)
     if(r&&!r.err&&r.netoMes){const lgc=all.map(s=>({name:s.name,hidden:!!s.hidden,x:leerMovimiento(s.rows,sw),s})).filter(o=>!o.x.err&&o.x.rows&&o.x.rows.length),lgel=lgc.length?elegirHojaMovimiento(lgc,mesesP).elegida:null,lgs=lgel&&{s:lgel.s,x:lgel.x},lg=lgs&&lgs.x;
       if(lg){const c=completarDebCre(r.rows,lg.rows);if(c.cuadre>=0.95){r.rows=c.rows;r.netoMes=false;r.debCre='débitos y créditos tomados de la hoja de movimiento del mismo libro';
@@ -13745,7 +13827,7 @@ async function loadSlot(k,files,opc){
 }
 function hasForm(){return Object.values(S.form).some(v=>v&&v.ret);}
 function buildCtx(){
-  const c=cur(),d=S.data,g=k=>d[k]&&d[k].parsed;
+  const c0=cur(),c=clienteConAlias(c0,mapaAliasCuentas(c0)),d=S.data,g=k=>d[k]&&d[k].parsed;   // el cliente con sus cuentas de pago y su tabla de cuentas en la numeración estándar
   const sp=g('dian')?splitDian(g('dian'),S.period,c&&c.nit):null;
   const anexo=g('det')&&g('det').anexoResumen?g('det'):null,detUso=anexo?null:g('det');
   const nube0=enriquecerNube({led:filtrarMovimientoPorMeses(g('led'),[S.period]),det:detUso,rec:sp&&sp.rec,ds:sp&&sp.ds,emi:sp&&sp.emi}),salud0=enriquecerSalud({led:nube0.led,det:nube0.det}),salud=enriquecerSiesa({led:salud0.led,det:salud0.det}),nube=Object.assign({},nube0,{led:salud.led,det:salud.det,info:Object.assign({},nube0.info,salud0.info,salud.info)});   // el módulo de cuentas por pagar del software de salud se une con el movimiento (copias)   // los reportes de SIIGO Nube sin NIT del tercero o sin cuenta se completan aquí (copias: lo leído no se toca)
@@ -14253,7 +14335,7 @@ function tabCliente(c){
    ${fld(c,'Tipo de contribuyente','tipo','select',{opts:['Persona jurídica','Entidad sin ánimo de lucro','Asociación','Persona natural']})}
    ${fld(c,'Periodicidad del IVA','periodicidad','select',{opts:['Bimestral','Cuatrimestral','No presenta']})}${fld(c,'Gran contribuyente','granContrib','select',{opts:['No','Sí']})}${fld(c,'Responsable de ICA (régimen)','icaRegimen','select',{opts:['No','Bimestral','Común anual','Preferencial']})}${fld(c,'Agente de retención de ICA','agenteReteICA','select',{opts:['No','Sí']})}</div></div>
   <div class="panel"><h3>Parámetros de revisión</h3><p class="hint">La UVT de cada año sale de «Normatividad utilizada», no de este perfil. La tolerancia absorbe el redondeo a miles del formulario.</p><div class="grid">
-   ${fld(c,'UVT especial (opcional: en 0 se usa la oficial de cada año)','uvtEspecial','number')}${fld(c,'Diferencia que se acepta al comparar ($)','tol','number')}${fld(c,'Cuenta donde se registra el pago a la DIAN','ctaPago')}${fld(c,'Cuenta de pago de la retención de ICA','ctaPagoRica')}
+   ${fld(c,'UVT especial (opcional: en 0 se usa la oficial de cada año)','uvtEspecial','number')}${fld(c,'Diferencia que se acepta al comparar ($)','tol','number')}${fld(c,'Cuenta donde se registra el pago a la DIAN','ctaPago')}${fld(c,'Cuenta de pago de la retención de ICA','ctaPagoRica')}${fld(c,'Cuenta de retención en la fuente (por defecto 2365)','ctaRetRtf')}${fld(c,'Cuenta de IVA retenido (por defecto 2367)','ctaRetIva')}${fld(c,'Cuenta de retención de ICA (por defecto 2368)','ctaRetIca')}<div class="f wide"><small class="hint">Solo cámbialas si este cliente lleva la retención en otras cuentas (por ejemplo 2465, 2467 y 2468): la app lee sus archivos con esas cuentas como si fueran las estándar. Si las cambias, escribe las cuentas de pago de arriba con la numeración del cliente.</small></div>
    ${fld(c,'Cuentas de retención: valor que se cruza con el formulario','retBase','select',{opts:['Saldo final','Movimiento del período']})}${fld(c,'Cuentas de gasto y costo a revisar (prefijos)','gasto')}${fld(c,'Cuentas de gasto que no se revisan (prefijos)','gastoExcl')}${fld(c,'Desde qué valor se busca retención que falta','omitModo','select',{opts:['Tabla 2026 por concepto','Umbral fijo (UVT)']})}${fld(c,'Valor fijo en UVT (si no se usa la tabla)','omitUvt','number')}</div>
    <p class="hint" style="margin-top:10px">Con «Tabla 2026 por concepto», cada documento se compara con la base mínima de su concepto en la tabla de retención (honorarios y comisiones desde $0, servicios desde 2 UVT, compras y arrendamientos desde 10 UVT), según el código o el nombre de su cuenta de gasto. El umbral en UVT se usa para los gastos cuyo concepto no se pueda identificar, o para todos si eliges «Umbral fijo». Súbelo a 95 UVT si quieres ver solo pagos que superan la base de honorarios del art. 383.</p></div>
   <details class="panel cuentasdet" ${S.avanzCuentas?'open':''}><summary style="cursor:pointer;font-weight:700">Cuentas de retención y conceptos del 350 · ${c.rules.length} cuentas</summary><p class="hint" style="margin-top:8px">Cada cuenta se asigna a un concepto del formulario. Gana el prefijo más largo. Aquí los rangos UVT del art. 383 (23651510 y 23651511) se llevan a Rentas de trabajo, como en el formulario de este cliente. Ya vienen las cuentas habituales: cámbialas solo si el plan de cuentas del cliente es distinto.</p>
@@ -14389,7 +14471,7 @@ async function loadForm131(f){
 async function loadSlotR(k,files,opc){if(k==='f131'&&files.length){await loadForm131(files[0]);return;}await loadSlot(k,files,opc);}   // opc (p. ej. los archivos ya cargados, al «Agregar otro archivo») también llega a ReteICA
 function prevDeclR(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m))return +m;const b=bimInfo(S.per.reteica),c=cur();const pp=b&&c.periods[periodoKey('reteica',b.prevId)];return pp&&pp.declarado?pp.declarado.total:null;}
 function buildCtxR(){
-  const c=cur(),d=S.rica.data,g=k=>d[k]&&d[k].parsed;const id=S.per.reteica,bim=bimInfo(id),cals=allCals();
+  const c0=cur(),c=clienteConAlias(c0,mapaAliasCuentas(c0)),d=S.rica.data,g=k=>d[k]&&d[k].parsed;const id=S.per.reteica,bim=bimInfo(id),cals=allCals();
   return{client:c,period:bim.fin,bim,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,balMeta:g('bal')?{saldoAnterior:g('bal').saldoAnterior||'',netoMes:!!g('bal').netoMes,corte:g('bal').corte||''}:null,led:filtrarMovimientoPorMeses(g('led'),[prevP(bim.fin),bim.fin]),det:g('det'),form:hasF131()?S.rica.form:null,
     venceActual:fechaObligacion(c,cals,'reteica',id),vencePrev:fechaObligacion(c,cals,'reteica',bim.prevId),prevDecl:prevDeclR()};
 }
@@ -14528,7 +14610,7 @@ function prevDeclI(){const m=pdata().meta.prevDecl;if(m!==''&&m!=null&&!isNaN(+m
 function ingPrevDef(){const c=cur(),b=bimInfo(S.per.ica);if(!b||c.icaRegimen!=='Bimestral')return null;let t=0,h=false;
   for(let n=1;n<b.n;n++){const pp=c.periods[periodoKey('ica',b.anio+'-B'+n)];if(pp&&pp.declarado&&pp.declarado.bruto!=null){t+=pp.declarado.bruto;h=true;}}return h?t:null;}
 function buildCtxI(){
-  const c=cur(),d=S.ica.data,g=k=>d[k]&&d[k].parsed,id=S.per.ica,p=icaPeriodo(c,id),cals=allCals();
+  const c0=cur(),c=clienteConAlias(c0,mapaAliasCuentas(c0)),d=S.ica.data,g=k=>d[k]&&d[k].parsed,id=S.per.ica,p=icaPeriodo(c,id),cals=allCals();
   const form=Object.assign({},S.ica.form);if(form.ingPrev==null||form.ingPrev==='')form.ingPrev=ingPrevDef();
   return{client:c,tipo:p.tipo,bim:p.bim,anio:p.anio,period:p.period,tol:+c.tol||1000,meta:pdata().meta,bal:g('bal')&&g('bal').rows,led:filtrarMovimientoPorMeses(g('led'),p.bim?[prevP(p.bim.fin),p.bim.fin]:Array.from({length:12},(_,k)=>p.anio+'-'+String(k+1).padStart(2,'0'))),det:g('det'),cert:g('cert'),form,
     venceActual:fechaObligacion(c,cals,'ica',id),vencePrev:fechaObligacion(c,cals,'ica',p.prevId),prevDecl:prevDeclI()};
@@ -14614,7 +14696,7 @@ function tabChecklist(c){
 /* ---- Carpeta de trabajo (opcional): la última versión de cada check list se guarda también en una carpeta que la persona elige (Chrome y Edge).
    El archivo va del navegador a su carpeta; no pasa por ningún servidor. Se reemplaza la versión anterior del mismo cliente y período (mismo nombre de archivo).
    Junto al Excel queda un registro liviano (fecha, resultado de las revisiones y checklist), sin datos de los terceros del cliente. La carpeta se recuerda en el navegador (IndexedDB). ---- */
-const APP_ENTREGA='fase4b-entrega83';
+const APP_ENTREGA='fase4b-entrega85';
 const carpetaSoportada=()=>typeof window.showDirectoryPicker==='function'&&!!window.indexedDB;
 function idbCarpeta(modo,valor){const llave=cuentaFirma()?'carpeta:'+cuentaFirma().firma_id:'carpeta';return new Promise((res,rej)=>{try{const rq=indexedDB.open('mesa_carpeta',1);rq.onupgradeneeded=()=>rq.result.createObjectStore('h');rq.onerror=()=>rej(rq.error);
   rq.onsuccess=()=>{const db=rq.result,tx=db.transaction('h',modo==='get'?'readonly':'readwrite'),st=tx.objectStore('h'),r=modo==='get'?st.get(llave):modo==='set'?st.put(valor,llave):st.delete(llave);r.onerror=()=>rej(r.error);tx.oncomplete=()=>{db.close();res(modo==='get'?r.result:true);};tx.onerror=()=>rej(tx.error);};}catch(e){rej(e);}});}
@@ -14786,7 +14868,8 @@ function infInicial(c){
   const mk=(k,nombre,titulo,periodicidad,imp)=>{const periodo=imp?infPeriodoPrev(k,periodicidad):'';return{k,nombre,titulo,periodicidad,periodo,periodoTxt:'',revisado:k==='retefuente',valor:'',venc:imp?((obs.find(o=>o.imp===imp&&o.id===periodo))||{}).fecha||'':'',decl:null};};
   const o={cid:c.id,fecha:hoyISO(),fechaRev:hoyISO(),pie,modo:'sin',revisoria:false,textoSin:textoSinObservaciones(false),textoEditado:false,
     imps:[mk('retefuente','Retención en la Fuente','Retención en la fuente','Mensual','retefuente'),mk('iva','IVA','IVA',c.iva==='Sí'?(c.periodicidad||'N/A'):'N/A',null),mk('ica','ICA','ICA',c.icaRegimen||'N/A','ica'),mk('reteica','Retención ICA '+mun,'Retención de ICA',c.agenteReteICA==='Sí'?'Bimestral':'N/A','reteica')],
-    docsExcel:INF_DOCS_EXCEL.map(([doc,estado])=>({doc,estado})),docsOtros:INF_DOCS_OTROS.map(([doc,estado])=>({doc,estado})),plan:null};
+    docsExcel:INF_DOCS_EXCEL.map(([doc,estado])=>({doc,estado})),docsOtros:INF_DOCS_OTROS.map(([doc,estado])=>({doc,estado})),plan:null,ctlNota:'',autoMarcar:false};
+  o.mesInf=S.infMesPend||mesDelPeriodo((o.imps.find(i=>i.revisado)||{}).periodo)||infPeriodoPrev('retefuente');S.infMesPend=null;{const h=informeHecho(c,o.mesInf);o.ctlFecha=h&&h.fecha?h.fecha:hoyISO();o.ctlNota=h?h.nota||'':'';}   // el mes del informe: el del período que se revisa; si ya estaba marcado, su fecha y su nota
   const P=c.informe;   // lo que se fue guardando en el perfil de este cliente: revisoría fiscal, párrafo, documentos recibidos, periodicidades y nombres de sección
   if(P&&typeof P==='object'){o.revisoria=!!P.revisoria;if(P.textoSin){o.textoSin=P.textoSin;o.textoEditado=true;}else o.textoSin=textoSinObservaciones(o.revisoria);
     for(const k of ['docsExcel','docsOtros'])if(Array.isArray(P[k])&&P[k].length)o[k]=P[k].map(d=>({doc:String(d.doc||''),estado:String(d.estado==null?'':d.estado)}));
@@ -14806,6 +14889,7 @@ function infGuardarSoon(){const c=cur();if(!c)return;
   infEstadoGuardado('Guardando…','');clearTimeout(infTmr);
   infTmr=setTimeout(async()=>{infGuardarPerfil();try{await persist(c);infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}catch(e){infEstadoGuardado('No pude guardar: quedó en este navegador.','mal');}},500);}
 function infSet(path,val){const I=S.inf;if(!I)return;const p=path.split('.');let o=I;for(let i=0;i<p.length-1;i++)o=o[p[i]];o[p[p.length-1]]=val;
+  if(path==='mesInf'){const h=informeHecho(cur(),val);I.ctlFecha=h&&h.fecha?h.fecha:hoyISO();I.ctlNota=h?h.nota||'':'';}
   if(path==='revisoria'&&!I.textoEditado)I.textoSin=textoSinObservaciones(!!val);if(path==='textoSin')I.textoEditado=true;
   if(/^(revisoria|textoSin|docsExcel\.|docsOtros\.|imps\.\d+\.(periodicidad|periodoTxt|titulo))/.test(path))infGuardarSoon();}
 async function infCambiarCliente(id){   // como al abrir un cliente desde el tablero
@@ -14813,6 +14897,10 @@ async function infCambiarCliente(id){   // como al abrir un cliente desde el tab
   S.clients=S.clients.filter(x=>!x._new||x.id===id);S.id=id;S.inf=null;S.view='informes';S.data={};S.results=null;resetRica();resetIca();resetForm();restoreForm(cur()&&cur().periods[S.period]);render();}
 function infRender(){const y=window.scrollY;render();try{window.scrollTo(0,y);}catch(e){}}
 function viewInformes(){
+  if(!S.clients.some(x=>!x._new))return viewInformeCliente();
+  const t=S.infTab==='control'?'control':'cliente';
+  return`<div class="inf-seg inf-tabs" role="group" aria-label="Informes"><button type="button" data-ia="tab-cliente" aria-pressed="${t==='cliente'}">Informe del cliente</button><button type="button" data-ia="tab-control" aria-pressed="${t==='control'}">Control del mes</button></div>`+(t==='control'?viewControlInformes():viewInformeCliente());}
+function viewInformeCliente(){
   const c=cur(),lista=S.clients.filter(x=>!x._new||(c&&x.id===c.id)).sort((p,q)=>String(p.razon||'').localeCompare(String(q.razon||''),'es'));
   if(!c&&!lista.length)return`<div class="empty"><h2>Informes</h2><p>Abre un cliente desde «Inicio» para preparar su informe: los datos del cliente salen de su perfil.</p></div>`;
   const selCli=`<label for="inf_cli">Cliente</label><select id="inf_cli" aria-label="Cliente del informe">${c?'':'<option value="">Elige un cliente…</option>'}${lista.map(x=>`<option value="${esc(x.id)}" ${c&&x.id===c.id?'selected':''}>${esc(x.razon||'(sin nombre)')}${x.nit?' · '+esc(x.nit):''}</option>`).join('')}</select>`;
@@ -14848,6 +14936,11 @@ function viewInformes(){
     <p class="hint" style="margin:0 0 8px">Sube un informe anterior (Word o PDF): se confirma que sea de este cliente y se toman solo las personas de «Atn.».</p>${impHtml}
     <div style="margin:0 0 14px"></div>
     <label for="inf_pie">Pie de página (opcional: dirección y teléfono de tu firma)</label><input type="text" id="inf_pie" data-inf="pie" value="${esc(I.pie)}" placeholder="Ej.: Dirección: Calle 1 # 2 - 3 • Teléfono: 300 000 0000"></div>
+    ${(()=>{const h=informeHecho(c,I.mesInf);return`<div class="panel inf-ctl"><h3>Control del informe del mes</h3><p class="hint">Marca aquí cuando ya hiciste el informe de la revisión de este cliente: queda guardado en su perfil y se ve en «Control del mes».</p>
+      <div class="inf-ctl-g"><div><label for="inf_mes">Mes del informe</label><select id="inf_mes" data-inf="mesInf" data-rr="1">${ultimosMeses(14).concat(ultimosMeses(1,I.mesInf)).filter((m,i,a)=>a.indexOf(m)===i).sort().reverse().map(m=>`<option value="${m}" ${m===I.mesInf?'selected':''}>${esc(periodoLargoES(m))}</option>`).join('')}</select></div>
+        <div><label for="inf_cf">Fecha en que lo hiciste</label><input type="date" id="inf_cf" data-inf="ctlFecha" value="${esc(I.ctlFecha)}"></div><div class="inf-ctl-n"><label for="inf_cn">Nota (opcional)</label><input type="text" id="inf_cn" data-inf="ctlNota" value="${esc(I.ctlNota)}" placeholder="Ej.: enviado por correo el 12/11"></div></div>
+      <div class="row" style="gap:10px;align-items:center;margin-top:10px"><span class="inf-chip ${h?'ok':'mal'}" id="inf_ctl_estado" role="status">${h?'✓ Informe realizado'+(h.fecha?' el '+fechaDMA(h.fecha):''):'Pendiente'}</span>${h?'<button class="btn ghost" type="button" data-ia="ctl-marcar">Actualizar fecha y nota</button><button class="btn ghost" type="button" data-ia="ctl-quitar">Quitar la marca</button>':'<button class="btn" type="button" data-ia="ctl-marcar">Marcar como realizado</button>'}</div>
+      <label style="font-weight:400;display:block;margin-top:8px"><input type="checkbox" data-inf="autoMarcar" ${I.autoMarcar?'checked':''}> Marcar como realizado al generar el Word</label></div>`;})()}
     <div class="panel"><h3>Impuestos revisados y valor por pagar</h3><p class="hint">Marca los impuestos que revisaste. Carga la declaración en PDF (con texto) y el valor a pagar se lee solo; si es una imagen o un PDF escaneado, escríbelo.</p>
       <div class="inf-tabla" role="table"><div class="inf-g inf-cab" role="row" aria-hidden="true"><span>Impuesto</span><span>Periodicidad</span><span>Período</span><span>Vence</span><span>Valor por pagar</span><span>Declaración (PDF)</span></div>${I.imps.map((im,i)=>fila(i,im)).join('')}</div>
       <div class="inf-total"><span>Total por pagar de los impuestos marcados</span><b id="inf_total">$ ${infFmtMonto(infTotal(I)||'')||'0'}</b></div></div>
@@ -14857,6 +14950,9 @@ function viewInformes(){
 function enlazarInformes(){
   const m=document.getElementById('main');if(!m)return;
   const sc0=m.querySelector('#inf_cli');if(sc0)sc0.addEventListener('change',()=>{if(sc0.value)infCambiarCliente(sc0.value);});   // el selector funciona también sin cliente abierto: elegirlo ya carga el informe
+  m.querySelectorAll('[data-ia]').forEach(b=>{if(!b.dataset.enlazado){b.dataset.enlazado='1';b.addEventListener('click',()=>infAccion(b.dataset.ia));}});   // las acciones (pestañas, control del mes) funcionan también sin un informe abierto
+  const cm=m.querySelector('#ctl_mes');if(cm)cm.addEventListener('change',()=>{ctlEstado().mes=cm.value;infRender();});
+  const cq=m.querySelector('#ctl_q');if(cq)cq.addEventListener('input',()=>{ctlEstado().q=cq.value;ctlRefrescar();});
   if(!S.inf)return;
   m.querySelectorAll('[data-inf]').forEach(el=>{const ev=el.type==='checkbox'||el.tagName==='SELECT'?'change':'input';el.addEventListener(ev,()=>{
     if(el.dataset.monto){const d=el.value.replace(/\D/g,'');infSet(el.dataset.inf,d);el.value=infFmtMonto(d);infTotalAct();return;}   // el monto se escribe con puntos de miles y se guarda solo con dígitos
@@ -14865,7 +14961,7 @@ function enlazarInformes(){
   m.querySelectorAll('[data-idecl]').forEach(el=>el.addEventListener('change',async()=>{const f=el.files&&el.files[0];if(f)await infLeerDeclaracion(+el.dataset.idecl,f);}));
   const im=m.querySelector('#inf_imp');if(im)im.addEventListener('change',async()=>{const f=im.files&&im.files[0];if(f)await infLeerInforme(f);});
   const pl=m.querySelector('#inf_plan');if(pl)pl.addEventListener('change',async()=>{const f=pl.files&&pl.files[0];if(f)await infLeerPlanilla(f);});
-  m.querySelectorAll('[data-ia]').forEach(b=>b.addEventListener('click',()=>infAccion(b.dataset.ia)));}
+  }
 async function infLeerDeclaracion(i,f){
   const I=S.inf,im=I.imps[i];im.decl={msg:'Leyendo «'+f.name+'»…',ok:false};infRender();let r=null,msg='';
   try{
@@ -14906,9 +15002,37 @@ async function infGenerar(){
   const r=infConstruir();if(r.err){toast(r.err);return;}const I=S.inf,c=cur();
   try{localStorage.setItem(INF_PIE_LS,I.pie||'');}catch(e){}
   try{const bytes=construirDocx(r.inf),nombre=nombreArchivoInforme(c.razon,(I.imps.find(i=>i.revisado)||{}).periodo);
-    await saveFile(nombre,new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);}
+    await saveFile(nombre,new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),true);
+    if(I.autoMarcar&&marcarInforme(c,I.mesInf,hoyISO(),I.ctlNota)){await persist(c);infRender();infEstadoGuardado('✓ Informe generado y marcado como realizado ('+periodoLargoES(I.mesInf)+')','ok');}}
   catch(e){console.error(e);toast('No pude generar el informe en Word.');}}
+/* Control del mes: todos los clientes con su informe realizado o pendiente */
+function ctlEstado(){if(!S.ctl)S.ctl={mes:infPeriodoPrev('retefuente'),filtro:'todos',q:''};return S.ctl;}
+function ctlTablaHtml(){
+  const C=ctlEstado(),r=controlInformes(S.clients,C.mes,C.filtro,C.q);
+  const fila=x=>`<div class="ctl-fila ${x.hecho?'on':''}" role="row"><div class="ctl-cli"><b>${esc(x.razon)}</b><small>${x.nit?'NIT '+esc(x.nit):''}</small></div><div class="ctl-est"><span class="inf-chip ${x.hecho?'ok':'mal'}">${x.hecho?'✓ Realizado'+(x.fecha?' el '+fechaDMA(x.fecha):''):'Pendiente'}</span>${x.nota?`<small class="hint">${esc(x.nota)}</small>`:''}</div>
+    <div class="ctl-acc"><button class="btn ${x.hecho?'ghost':''}" type="button" data-ia="ctl-toggle:${esc(x.id)}" aria-label="${x.hecho?'Quitar la marca de':'Marcar como realizado el informe de'} ${esc(x.razon)}">${x.hecho?'Quitar la marca':'Marcar realizado'}</button><button class="btn ghost" type="button" data-ia="ctl-abrir:${esc(x.id)}" aria-label="Abrir el informe de ${esc(x.razon)}">Abrir informe</button></div></div>`;
+  return{resumen:`<b>${r.hechos} de ${r.total}</b> informes realizados${r.pendientes?` · faltan ${r.pendientes}`:' · ¡todos al día!'}<div class="ctl-barra" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.pct}" aria-label="Informes realizados del mes"><i style="width:${r.pct}%"></i></div>`,
+    tabla:r.rows.length?r.rows.map(fila).join(''):`<p class="hint" style="margin:10px 0">${r.total?'Ningún cliente coincide con el filtro o la búsqueda.':'Aún no hay clientes guardados.'}</p>`};}
+function viewControlInformes(){
+  const C=ctlEstado(),t=ctlTablaHtml(),meses=ultimosMeses(14).concat(ultimosMeses(1,C.mes)).filter((m,i,a)=>a.indexOf(m)===i).sort().reverse();
+  return`<div class="panel"><h2 style="margin:0 0 4px">Control de informes del mes</h2><p class="hint" style="margin:0 0 10px">Marca los clientes a los que ya les hiciste el informe de la revisión del mes. La marca se guarda en el perfil de cada cliente (también se puede poner desde «Informe del cliente»).</p>
+    <div class="ctl-bar"><div><label for="ctl_mes">Mes</label><select id="ctl_mes" data-ctl="mes">${meses.map(m=>`<option value="${m}" ${m===C.mes?'selected':''}>${esc(periodoLargoES(m))}</option>`).join('')}</select></div>
+      <div class="ctl-q"><label for="ctl_q">Buscar cliente</label><input type="search" id="ctl_q" data-ctl="q" value="${esc(C.q)}" placeholder="Nombre o NIT"></div>
+      <div class="inf-seg" role="group" aria-label="Filtro">${[['todos','Todos'],['pendientes','Pendientes'],['realizados','Realizados']].map(([k,l])=>`<button type="button" data-ia="ctl-filtro:${k}" aria-pressed="${C.filtro===k}">${l}</button>`).join('')}</div></div>
+    <div class="ctl-resumen" id="ctl_resumen" aria-live="polite">${t.resumen}</div><div class="ctl-tabla" id="ctl_tabla" role="table">${t.tabla}</div></div>`;}
+function ctlRefrescar(){const t=ctlTablaHtml(),a=document.getElementById('ctl_resumen'),b=document.getElementById('ctl_tabla');if(a)a.innerHTML=t.resumen;if(b)b.innerHTML=t.tabla;enlazarInformes();}
+async function ctlAccion(a){
+  const C=ctlEstado();let m;
+  if((m=/^ctl-filtro:(todos|pendientes|realizados)$/.exec(a))){C.filtro=m[1];infRender();return true;}
+  if((m=/^ctl-toggle:(.+)$/.exec(a))){const c=S.clients.find(x=>x.id===m[1]&&!x._new);if(!c)return true;if(informeHecho(c,C.mes))quitarMarcaInforme(c,C.mes);else marcarInforme(c,C.mes,hoyISO(),'');await persist(c);ctlRefrescar();return true;}
+  if((m=/^ctl-abrir:(.+)$/.exec(a))){S.infTab='cliente';S.infMesPend=C.mes;if(cur()&&cur().id===m[1]){S.inf=null;render();}else await infCambiarCliente(m[1]);return true;}
+  if(a==='ctl-marcar'||a==='ctl-quitar'){const c=cur(),I=S.inf;if(!c||!I)return true;
+    if(a==='ctl-marcar')marcarInforme(c,I.mesInf,I.ctlFecha||hoyISO(),I.ctlNota);else quitarMarcaInforme(c,I.mesInf);
+    await persist(c);infRender();infEstadoGuardado(c._new?'Este cliente aún no está guardado: guárdalo en la pestaña «Cliente» para conservar la marca.':'✓ Guardado en el perfil de '+(c.razon||'este cliente'),c._new?'mal':'ok');return true;}
+  return false;}
 async function infAccion(a){
+  if(a==='tab-cliente'||a==='tab-control'){S.infTab=a==='tab-control'?'control':'cliente';infRender();return;}
+  if(a.startsWith('ctl-')&&await ctlAccion(a))return;
   const I=S.inf;if(!I)return;
   const c=cur();
   if(a==='atn-add'&&c){(c.atencion=c.atencion||[]).push({nombre:'',cargo:''});await persist(c);infRender();infEstadoGuardado('✓ Guardado en el perfil de '+(c.razon||'este cliente'),'ok');}
@@ -14977,7 +15101,14 @@ async function descartarCambiosPerfil(){
 function hayCambiosSinGuardar(){if(S.tab==='cliente'&&S.view==='cliente')collectClient();   // lo escrito en pantalla se recoge antes de decidir
   const c=cur();return !!((S.dirty&&c&&!c._new&&S.dirtyId===c.id)||borradoresConDatos([]).length);}
 window.addEventListener('beforeunload',e=>{let hay=false;try{hay=hayCambiosSinGuardar();}catch(err){hay=false;}if(hay){e.preventDefault();e.returnValue='';}});   // un error interno nunca debe impedir cerrar
-function bannerRespaldo(){
+/* Aviso de las cuentas de retención del cliente: si usa otras, lo dice; si no las tiene configuradas y un archivo las trae, lo avisa */
+function bannerCuentas(){
+  const c=cur();if(!c||['home','pend','norma','informes'].includes(S.view))return'';
+  if(Object.keys(mapaAliasCuentas(c)).length)return`<div class="aviso-cuentas ok" role="note"><b>Cuentas de retención de este cliente:</b> ${esc(textoAliasCuentas(c))}. En los mensajes y en los anexos las cuentas aparecen con la numeración estándar.</div>`;
+  const a=S.aliasAviso;if(a&&a.cid===c.id){const l=Object.keys(a.alias).filter(k=>a.alias[k]).join(', ').replace(/, ([^,]*)$/,' y $1');return`<div class="aviso-cuentas mal" role="alert"><b>«${esc(a.archivo)}» trae las cuentas ${esc(l)}</b> y ninguna 2365, 2367 o 2368. Si este cliente lleva la retención en esas cuentas, actívalo en la pestaña «Cliente» → Opciones avanzadas → «Cuentas de retención» y vuelve a cargar el archivo.</div>`;}
+  return'';}
+function bannerRespaldo(){return bannerRespaldo0()+bannerCuentas();}
+function bannerRespaldo0(){
   if(S.mode==='equipo'||S.cuenta||S.respOculto||!S.clients.some(c=>!c._new))return '';
   let iso=null;try{iso=localStorage.getItem('mesa_ultimo_respaldo');}catch(e){}
   const d=iso?Math.floor((Date.now()-new Date(iso).getTime())/86400000):null;if(iso&&d<=7)return '';
